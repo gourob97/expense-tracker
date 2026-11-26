@@ -1,0 +1,386 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Expense Tracker</title>
+<style>
+:root{--bg:#f5f6f8;--card:#fff;--text:#1c1f26;--muted:#6b7280;--accent:#2563eb;--danger:#dc2626;--border:#e5e7eb}
+*{box-sizing:border-box}
+body{margin:0;font-family:system-ui,-apple-system,Segoe UI,Roboto,sans-serif;background:var(--bg);color:var(--text)}
+header{background:var(--card);border-bottom:1px solid var(--border);padding:12px 16px;display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap}
+h1{font-size:18px;margin:0}
+main{max-width:720px;margin:0 auto;padding:16px;display:grid;gap:16px}
+.card{background:var(--card);border:1px solid var(--border);border-radius:12px;padding:16px}
+.card h2{font-size:15px;margin:0 0 12px}
+button{font:inherit;border:0;border-radius:8px;padding:8px 14px;background:var(--accent);color:#fff;cursor:pointer}
+button.ghost{background:transparent;color:var(--accent);border:1px solid var(--border)}
+button.danger{background:var(--danger)}
+button.small{padding:4px 8px;font-size:13px}
+input,select{font:inherit;padding:8px;border:1px solid var(--border);border-radius:8px;width:100%;background:#fff;min-width:0}
+.row{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
+.row>*{flex:1 1 140px}
+.row>button{flex:0 0 auto}
+.muted{color:var(--muted);font-size:13px}
+.total{font-size:28px;font-weight:700;margin:4px 0}
+.bar{height:8px;background:var(--border);border-radius:4px;overflow:hidden;margin-top:4px}
+.bar>div{height:100%;background:var(--accent)}
+.bar>div.over{background:var(--danger)}
+.item{display:flex;justify-content:space-between;align-items:center;padding:8px 0;border-bottom:1px solid var(--border);gap:8px}
+.item:last-child{border-bottom:0}
+.amt{font-weight:600;white-space:nowrap}
+.catrow{padding:6px 0;border-bottom:1px solid var(--border)}
+.catrow:last-child{border-bottom:0}
+.hidden{display:none!important}
+#status{min-height:1em}
+</style>
+</head>
+<body>
+<header>
+  <h1>Expense Tracker</h1>
+  <span class="muted" id="who"></span>
+</header>
+
+<main>
+  <section id="setup" class="card hidden">
+    <h2>Setup needed</h2>
+    <p class="muted">Paste your Firebase web config into the <code>firebaseConfig</code> object in this file, then reload. Steps are in the message that came with this file.</p>
+  </section>
+
+  <section id="loginCard" class="card">
+    <h2>Sign in</h2>
+    <p class="muted">Your expenses sync to your Google account.</p>
+    <button id="signInBtn">Sign in with Google</button>
+  </section>
+
+  <div id="appCards" class="hidden" style="display:grid;gap:16px">
+    <section class="card">
+      <div class="row">
+        <input type="month" id="month" style="max-width:200px">
+        <button class="ghost" id="signOutBtn">Sign out</button>
+      </div>
+      <p class="muted" id="monthLabel" style="margin-top:12px"></p>
+      <p class="muted" style="margin:0">Total spent</p>
+      <div class="total" id="total">৳0</div>
+    </section>
+
+    <section class="card">
+      <h2>Add expense</h2>
+      <form id="addForm" class="row">
+        <input type="number" id="amount" placeholder="Amount (৳)" min="0" step="0.01" required>
+        <select id="category"></select>
+        <input type="date" id="date" required>
+        <input type="text" id="note" placeholder="Note (optional)">
+        <button type="submit">Add</button>
+      </form>
+    </section>
+
+    <section class="card">
+      <h2>Expenses this month</h2>
+      <div id="list"></div>
+    </section>
+
+    <section class="card">
+      <h2>Categories &amp; monthly budgets</h2>
+      <p class="muted" style="margin-top:0">Leave a budget empty for no limit. Bars turn red when you go over.</p>
+      <div id="cats"></div>
+      <div class="row" style="margin-top:12px"><button id="saveBudgets">Save budgets</button></div>
+    </section>
+
+    <section class="card">
+      <h2>Recurring expenses</h2>
+      <div id="recurring"></div>
+      <form id="recForm" class="row" style="margin-top:12px">
+        <input type="number" id="rAmount" placeholder="Amount (৳)" min="0" step="0.01" required>
+        <select id="rCategory"></select>
+        <input type="number" id="rDay" placeholder="Day of month" min="1" max="31" value="1" required>
+        <input type="text" id="rNote" placeholder="Name, e.g. House rent">
+        <button type="submit">Add</button>
+      </form>
+      <div class="row" style="margin-top:12px">
+        <button class="ghost" id="applyRec">Add recurring items to this month</button>
+      </div>
+    </section>
+  </div>
+
+  <p id="status" class="muted"></p>
+</main>
+
+<script type="module">
+import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
+import { getAuth, GoogleAuthProvider, signInWithPopup, signOut, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js";
+import { getFirestore, collection, doc, addDoc, deleteDoc, setDoc, onSnapshot, query, where, orderBy } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
+
+// ===== 1. PASTE YOUR FIREBASE WEB CONFIG HERE =====
+const firebaseConfig = {
+  apiKey: "AIzaSyCxGxl9MB56Hukv5qij_t-jbtdrdVoNacs",
+  authDomain: "personal-expense-tracker-d2914.firebaseapp.com",
+  projectId: "personal-expense-tracker-d2914",
+  appId: "1:642059260081:web:0e3f0055881797852ad290"
+};
+// ==================================================
+
+const CATEGORIES = ["Food","Transport","Bills","Rent","Shopping","Health","Entertainment","Other"];
+const $ = id => document.getElementById(id);
+const pad = n => String(n).padStart(2, "0");
+const todayISO = () => { const d = new Date(); return `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}`; };
+const fmt = n => "৳" + Number(n || 0).toLocaleString("en-US", { maximumFractionDigits: 2 });
+const setStatus = (msg, isErr) => { const s = $("status"); s.textContent = msg || ""; s.style.color = isErr ? "#dc2626" : ""; };
+
+let selectedMonth = todayISO().slice(0, 7);
+let user = null, expenses = [], budgets = {}, recurring = [];
+let unsubs = [], monthUnsub = null;
+let auth, db;
+
+const configured = !firebaseConfig.apiKey.startsWith("YOUR_");
+if (!configured) {
+  $("setup").classList.remove("hidden");
+  $("loginCard").classList.add("hidden");
+} else {
+  const app = initializeApp(firebaseConfig);
+  auth = getAuth(app);
+  db = getFirestore(app);
+  init();
+}
+
+function init() {
+  CATEGORIES.forEach(c => {
+    $("category").add(new Option(c, c));
+    $("rCategory").add(new Option(c, c));
+  });
+  buildCategoryRows();
+  $("month").value = selectedMonth;
+  $("date").value = todayISO();
+
+  $("month").onchange = e => { selectedMonth = e.target.value; if (user) subscribeMonth(); };
+  $("signInBtn").onclick = () => guard(() => signInWithPopup(auth, new GoogleAuthProvider()))();
+  $("signOutBtn").onclick = () => guard(() => signOut(auth))();
+  $("addForm").onsubmit = e => { e.preventDefault(); guard(addExpense)(); };
+  $("recForm").onsubmit = e => { e.preventDefault(); guard(addRecurring)(); };
+  $("saveBudgets").onclick = guard(saveBudgets);
+  $("applyRec").onclick = guard(applyRecurring);
+
+  onAuthStateChanged(auth, u => {
+    user = u;
+    stopListeners();
+    if (u) {
+      $("loginCard").classList.add("hidden");
+      $("appCards").classList.remove("hidden");
+      $("who").textContent = u.email || u.displayName || "";
+      subscribeAll();
+    } else {
+      $("loginCard").classList.remove("hidden");
+      $("appCards").classList.add("hidden");
+      $("who").textContent = "";
+      expenses = []; budgets = {}; recurring = [];
+    }
+  });
+}
+
+// Wrap async actions so errors show in the status line instead of failing silently
+function guard(fn) {
+  return async (...args) => {
+    try { await fn(...args); }
+    catch (e) { setStatus(e.message || String(e), true); }
+  };
+}
+
+function stopListeners() {
+  unsubs.forEach(f => f()); unsubs = [];
+  if (monthUnsub) { monthUnsub(); monthUnsub = null; }
+}
+
+function subscribeAll() {
+  subscribeMonth();
+  unsubs.push(onSnapshot(doc(db, "users", user.uid, "settings", "budgets"), s => {
+    budgets = s.exists() ? s.data() : {};
+    CATEGORIES.forEach(c => { $("b-" + c).value = budgets[c] ?? ""; });
+    renderMonth();
+  }, e => setStatus(e.message, true)));
+  unsubs.push(onSnapshot(collection(db, "users", user.uid, "recurring"), s => {
+    recurring = s.docs.map(d => ({ id: d.id, ...d.data() }));
+    renderRecurring();
+  }, e => setStatus(e.message, true)));
+}
+
+function subscribeMonth() {
+  if (monthUnsub) monthUnsub();
+  const start = `${selectedMonth}-01`, end = `${selectedMonth}-31`;
+  const q = query(
+    collection(db, "users", user.uid, "expenses"),
+    where("date", ">=", start), where("date", "<=", end),
+    orderBy("date", "desc")
+  );
+  monthUnsub = onSnapshot(q, s => {
+    expenses = s.docs.map(d => ({ id: d.id, ...d.data() }));
+    renderMonth();
+    renderExpenses();
+  }, e => setStatus(e.message, true));
+}
+
+function buildCategoryRows() {
+  const wrap = $("cats");
+  CATEGORIES.forEach(c => {
+    const row = document.createElement("div");
+    row.className = "catrow";
+    row.innerHTML = `
+      <div class="item" style="border:0;padding:4px 0">
+        <span style="flex:1">${c}</span>
+        <span class="muted" id="s-${c}"></span>
+        <input type="number" min="0" step="1" placeholder="Budget" id="b-${c}" style="max-width:120px">
+      </div>
+      <div class="bar"><div id="bar-${c}"></div></div>`;
+    wrap.appendChild(row);
+  });
+}
+
+function renderMonth() {
+  const [y, m] = selectedMonth.split("-").map(Number);
+  $("monthLabel").textContent = new Date(y, m - 1, 1).toLocaleString("en-US", { month: "long", year: "numeric" });
+  const total = expenses.reduce((s, e) => s + Number(e.amount), 0);
+  $("total").textContent = fmt(total);
+
+  const byCat = {};
+  expenses.forEach(e => { byCat[e.category] = (byCat[e.category] || 0) + Number(e.amount); });
+
+  CATEGORIES.forEach(c => {
+    const spent = byCat[c] || 0;
+    const budget = Number(budgets[c]) || 0;
+    let text = fmt(spent);
+    if (budget) {
+      text += ` / ${fmt(budget)} ` + (spent > budget ? `(over by ${fmt(spent - budget)})` : `(left ${fmt(budget - spent)})`);
+    }
+    $("s-" + c).textContent = text;
+    // With a budget: bar = share of budget used. Without: bar = share of this month's total.
+    const pct = budget ? Math.min(100, spent / budget * 100) : (total ? spent / total * 100 : 0);
+    const bar = $("bar-" + c);
+    bar.style.width = pct + "%";
+    bar.className = budget && spent > budget ? "over" : "";
+  });
+}
+
+function renderExpenses() {
+  const box = $("list");
+  box.replaceChildren();
+  if (!expenses.length) { box.className = "muted"; box.textContent = "No expenses this month."; return; }
+  box.className = "";
+  expenses.forEach(e => {
+    const row = document.createElement("div");
+    row.className = "item";
+    const left = document.createElement("div");
+    const t = document.createElement("div");
+    t.textContent = e.category + (e.note ? " · " + e.note : "");
+    const d = document.createElement("div");
+    d.className = "muted";
+    d.textContent = e.date;
+    left.append(t, d);
+    const amt = document.createElement("span");
+    amt.className = "amt";
+    amt.textContent = fmt(e.amount);
+    const del = document.createElement("button");
+    del.className = "small danger";
+    del.textContent = "Delete";
+    del.onclick = guard(() => removeExpense(e.id));
+    row.append(left, amt, del);
+    box.appendChild(row);
+  });
+}
+
+function renderRecurring() {
+  const box = $("recurring");
+  box.replaceChildren();
+  if (!recurring.length) { box.className = "muted"; box.textContent = "No recurring expenses yet."; return; }
+  box.className = "";
+  recurring.forEach(r => {
+    const row = document.createElement("div");
+    row.className = "item";
+    const left = document.createElement("div");
+    const t = document.createElement("div");
+    t.textContent = (r.note || r.category);
+    const d = document.createElement("div");
+    d.className = "muted";
+    d.textContent = `${r.category} · day ${r.day} of each month`;
+    left.append(t, d);
+    const amt = document.createElement("span");
+    amt.className = "amt";
+    amt.textContent = fmt(r.amount);
+    const del = document.createElement("button");
+    del.className = "small danger";
+    del.textContent = "Delete";
+    del.onclick = guard(() => removeRecurring(r.id));
+    row.append(left, amt, del);
+    box.appendChild(row);
+  });
+}
+
+async function addExpense() {
+  const amount = Number($("amount").value);
+  const date = $("date").value;
+  if (!(amount > 0) || !date) return;
+  await addDoc(collection(db, "users", user.uid, "expenses"), {
+    amount, category: $("category").value, date,
+    note: $("note").value.trim(), recurringId: null, createdAt: Date.now()
+  });
+  // If the new expense falls in another month, switch the view to that month
+  if (date.slice(0, 7) !== selectedMonth) {
+    selectedMonth = date.slice(0, 7);
+    $("month").value = selectedMonth;
+    subscribeMonth();
+  }
+  $("amount").value = "";
+  $("note").value = "";
+  setStatus("Expense added.");
+}
+
+async function removeExpense(id) {
+  if (!confirm("Delete this expense?")) return;
+  await deleteDoc(doc(db, "users", user.uid, "expenses", id));
+}
+
+async function saveBudgets() {
+  const obj = {};
+  CATEGORIES.forEach(c => {
+    const v = Number($("b-" + c).value);
+    if (v > 0) obj[c] = v;
+  });
+  await setDoc(doc(db, "users", user.uid, "settings", "budgets"), obj);
+  setStatus("Budgets saved.");
+}
+
+async function addRecurring() {
+  const amount = Number($("rAmount").value);
+  const day = Math.min(31, Math.max(1, Number($("rDay").value)));
+  if (!(amount > 0)) return;
+  await addDoc(collection(db, "users", user.uid, "recurring"), {
+    amount, category: $("rCategory").value, day, note: $("rNote").value.trim()
+  });
+  $("rAmount").value = "";
+  $("rNote").value = "";
+  setStatus("Recurring expense saved.");
+}
+
+async function removeRecurring(id) {
+  if (!confirm("Delete this recurring expense? Existing entries stay.")) return;
+  await deleteDoc(doc(db, "users", user.uid, "recurring", id));
+}
+
+// Creates one expense per recurring item for the selected month, skipping any already created
+async function applyRecurring() {
+  const [y, m] = selectedMonth.split("-").map(Number);
+  const daysInMonth = new Date(y, m, 0).getDate();
+  let added = 0;
+  for (const r of recurring) {
+    if (expenses.some(e => e.recurringId === r.id)) continue;
+    const day = Math.min(r.day, daysInMonth);
+    await addDoc(collection(db, "users", user.uid, "expenses"), {
+      amount: r.amount, category: r.category, note: r.note || "",
+      date: `${selectedMonth}-${pad(day)}`, recurringId: r.id, createdAt: Date.now()
+    });
+    added++;
+  }
+  setStatus(added ? `Added ${added} recurring expense(s) to ${selectedMonth}.`
+                  : "Nothing to add: already applied, or no recurring items.");
+}
+</script>
+</body>
+</html>
