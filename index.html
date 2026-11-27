@@ -1,142 +1,146 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="en" data-theme="dark">
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Expense Tracker</title>
 <style>
-:root{--bg:#f5f6f8;--card:#fff;--text:#1c1f26;--muted:#6b7280;--accent:#2563eb;--danger:#dc2626;--ok:#16a34a;--border:#e5e7eb;--input:#fff}
-:root[data-theme="dark"]{--bg:#0f1115;--card:#181b22;--text:#e5e7eb;--muted:#9ca3af;--accent:#3b82f6;--danger:#ef4444;--ok:#22c55e;--border:#2c313b;--input:#0f1115}
+:root{--bg:#0b0d10;--panel:#11141a;--line:#1e232b;--text:#d7dce4;--muted:#6b7480;--accent:#f0b429;--danger:#f87171;--ok:#4ade80;--input:#0b0d10;--accent-ink:#0b0d10}
+:root[data-theme="light"]{--bg:#f4f4f1;--panel:#ffffff;--line:#dcdcd6;--text:#1a1c20;--muted:#6f7275;--accent:#b7791f;--danger:#c53030;--ok:#2f855a;--input:#fbfbf9;--accent-ink:#ffffff}
 *{box-sizing:border-box}
-body{margin:0;font-family:system-ui,-apple-system,Segoe UI,Roboto,sans-serif;background:var(--bg);color:var(--text)}
-header{background:var(--card);border-bottom:1px solid var(--border);padding:12px 16px;display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap}
-h1{font-size:18px;margin:0}
-main{max-width:720px;margin:0 auto;padding:16px;display:grid;gap:16px}
-.card{background:var(--card);border:1px solid var(--border);border-radius:12px;padding:16px}
-.card h2{font-size:15px;margin:0 0 12px}
-button{font:inherit;border:0;border-radius:8px;padding:8px 14px;background:var(--accent);color:#fff;cursor:pointer}
-button.ghost{background:transparent;color:var(--accent);border:1px solid var(--border)}
-button.danger{background:var(--danger)}
-button.small{padding:4px 8px;font-size:13px}
-input,select{font:inherit;padding:8px;border:1px solid var(--border);border-radius:8px;width:100%;background:var(--input);color:var(--text);min-width:0}
+body{margin:0;font-family:ui-sans-serif,system-ui,-apple-system,"Segoe UI",sans-serif;background:var(--bg);color:var(--text);font-size:14px;line-height:1.4}
+.num,.mono{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-variant-numeric:tabular-nums}
+header{display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap;padding:14px 20px;border-bottom:1px solid var(--line)}
+h1{font-size:13px;letter-spacing:.14em;text-transform:uppercase;margin:0;font-weight:600}
+h2{font-size:11px;letter-spacing:.12em;text-transform:uppercase;color:var(--muted);font-weight:600;margin:0 0 12px}
+main{max-width:1000px;margin:0 auto;padding:20px;display:grid;gap:12px}
+.panel{background:var(--panel);border:1px solid var(--line);border-radius:4px;padding:16px}
+.grid{display:grid;gap:12px}
+@media(min-width:800px){.grid.two{grid-template-columns:1fr 1fr;align-items:start}}
+button{font:inherit;font-size:12px;letter-spacing:.04em;border:1px solid var(--accent);border-radius:3px;padding:7px 12px;background:var(--accent);color:var(--accent-ink);cursor:pointer}
+button.ghost{background:transparent;color:var(--text);border-color:var(--line)}
+button.danger{background:transparent;color:var(--danger);border-color:var(--danger)}
+button.small{padding:3px 8px;font-size:11px}
+input,select{font:inherit;font-size:13px;padding:7px 8px;border:1px solid var(--line);border-radius:3px;width:100%;background:var(--input);color:var(--text);min-width:0}
+input:focus,select:focus{outline:1px solid var(--accent);border-color:var(--accent)}
 .row{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
-.row>*{flex:1 1 140px}
+.row>*{flex:1 1 120px}
 .row>button{flex:0 0 auto}
-.muted{color:var(--muted);font-size:13px}
-.total{font-size:22px;font-weight:700;margin:4px 0}
-.bar{height:8px;background:var(--border);border-radius:4px;overflow:hidden;margin-top:4px}
+.muted{color:var(--muted);font-size:12px}
+.stats{display:grid;grid-template-columns:repeat(3,1fr);gap:12px}
+.stat .v{font-size:22px;font-weight:600;margin-top:4px}
+.bar{height:4px;background:var(--line);margin-top:6px}
 .bar>div{height:100%;background:var(--accent)}
 .bar>div.over{background:var(--danger)}
-.item{display:flex;justify-content:space-between;align-items:center;padding:8px 0;border-bottom:1px solid var(--border);gap:8px}
+.item{display:flex;justify-content:space-between;align-items:center;padding:9px 0;border-bottom:1px solid var(--line);gap:10px}
 .item:last-child{border-bottom:0}
-.amt{font-weight:600;white-space:nowrap}
-.catrow{padding:6px 0;border-bottom:1px solid var(--border)}
+.amt{font-family:ui-monospace,Menlo,monospace;font-weight:600;white-space:nowrap}
+.catrow{padding:7px 0;border-bottom:1px solid var(--line)}
 .catrow:last-child{border-bottom:0}
 .hidden{display:none!important}
-#status{min-height:1em}
+#status{min-height:1em;font-size:12px}
 </style>
 </head>
 <body>
 <header>
-  <h1>Expense Tracker</h1>
-  <div class="row" style="flex:0 0 auto">
+  <h1>Expense Ledger</h1>
+  <div class="row" style="flex:0 0 auto;gap:12px">
     <span class="muted" id="who"></span>
-    <button class="ghost small" id="themeBtn">Dark</button>
+    <button class="ghost small" id="themeBtn">Light</button>
   </div>
 </header>
 
 <main>
-  <section id="setup" class="card hidden">
+  <section id="setup" class="panel hidden">
     <h2>Setup needed</h2>
     <p class="muted">Paste your Firebase web config into the <code>firebaseConfig</code> object in this file, then reload.</p>
   </section>
 
-  <section id="loginCard" class="card">
+  <section id="loginCard" class="panel">
     <h2>Sign in</h2>
-    <p class="muted">Your data syncs to your Google account.</p>
+    <p class="muted" style="margin:0 0 12px">Your data syncs to your Google account.</p>
     <button id="signInBtn">Sign in with Google</button>
   </section>
 
-  <div id="appCards" class="hidden" style="display:grid;gap:16px">
-    <section class="card">
-      <div class="row">
-        <input type="month" id="month" style="max-width:200px">
-        <button class="ghost" id="signOutBtn">Sign out</button>
+  <div id="appCards" class="hidden grid">
+    <section class="panel">
+      <div class="row" style="justify-content:space-between">
+        <input type="month" id="month" class="mono" style="max-width:180px">
+        <button class="ghost small" id="signOutBtn">Sign out</button>
       </div>
-      <p class="muted" id="monthLabel" style="margin-top:12px"></p>
-      <div class="row" style="margin-top:8px">
-        <div><p class="muted" style="margin:0">Income</p><div class="total" id="incomeTotal">৳0</div></div>
-        <div><p class="muted" style="margin:0">Spent</p><div class="total" id="total">৳0</div></div>
-        <div><p class="muted" style="margin:0">Balance</p><div class="total" id="balance">৳0</div></div>
+      <p class="muted" id="monthLabel" style="margin:14px 0 0"></p>
+      <div class="stats" style="margin-top:8px">
+        <div class="stat"><div class="muted">Income</div><div class="v num" id="incomeTotal">৳0</div></div>
+        <div class="stat"><div class="muted">Spent</div><div class="v num" id="total">৳0</div></div>
+        <div class="stat"><div class="muted">Balance</div><div class="v num" id="balance">৳0</div></div>
       </div>
     </section>
 
-    <section class="card">
-      <h2>Add expense</h2>
-      <form id="addForm" class="row">
-        <input type="number" id="amount" placeholder="Amount (৳)" min="0" step="0.01" required>
-        <select id="category"></select>
-        <input type="date" id="date" required>
-        <input type="text" id="note" placeholder="Note (optional)">
-        <button type="submit">Add</button>
-      </form>
-    </section>
+    <div class="grid two">
+      <section class="panel">
+        <h2>Add expense</h2>
+        <form id="addForm" class="grid" style="gap:8px">
+          <input type="number" id="amount" class="mono" placeholder="Amount (৳)" min="0" step="0.01" required>
+          <select id="category"></select>
+          <input type="date" id="date" required>
+          <input type="text" id="note" placeholder="Note (optional)">
+          <button type="submit">Add expense</button>
+        </form>
+      </section>
 
-    <section class="card">
-      <h2>Expenses this month</h2>
-      <div id="list"></div>
-    </section>
+      <section class="panel">
+        <h2>Add income</h2>
+        <form id="incForm" class="grid" style="gap:8px">
+          <input type="number" id="iAmount" class="mono" placeholder="Amount (৳)" min="0" step="0.01" required>
+          <input type="date" id="iDate" required>
+          <input type="text" id="iNote" placeholder="Source, e.g. Freelance">
+          <button type="submit">Add income</button>
+        </form>
+      </section>
+    </div>
 
-    <section class="card">
-      <h2>Add income</h2>
-      <form id="incForm" class="row">
-        <input type="number" id="iAmount" placeholder="Amount (৳)" min="0" step="0.01" required>
-        <input type="date" id="iDate" required>
-        <input type="text" id="iNote" placeholder="Source, e.g. Freelance">
-        <button type="submit">Add</button>
-      </form>
-    </section>
+    <div class="grid two">
+      <section class="panel">
+        <h2>Expenses this month</h2>
+        <div id="list"></div>
+      </section>
+      <section class="panel">
+        <h2>Income this month</h2>
+        <div id="incomeList"></div>
+      </section>
+    </div>
 
-    <section class="card">
-      <h2>Income this month</h2>
-      <div id="incomeList"></div>
-    </section>
-
-    <section class="card">
-      <h2>Categories &amp; monthly budgets</h2>
-      <p class="muted" style="margin-top:0">Leave a budget empty for no limit. Bars turn red when you go over.</p>
+    <section class="panel">
+      <h2>Categories &amp; budgets</h2>
+      <p class="muted" style="margin:0 0 6px">Leave a budget empty for no limit. Bars turn red when you go over.</p>
       <div id="cats"></div>
       <div class="row" style="margin-top:12px"><button id="saveBudgets">Save budgets</button></div>
     </section>
 
-    <section class="card">
-      <h2>Recurring expenses</h2>
-      <div id="recurring"></div>
-      <form id="recForm" class="row" style="margin-top:12px">
-        <input type="number" id="rAmount" placeholder="Amount (৳)" min="0" step="0.01" required>
-        <select id="rCategory"></select>
-        <input type="number" id="rDay" placeholder="Day of month" min="1" max="31" value="1" required>
-        <input type="text" id="rNote" placeholder="Name, e.g. House rent">
-        <button type="submit">Add</button>
-      </form>
-      <div class="row" style="margin-top:12px">
-        <button class="ghost" id="applyRec">Add recurring expenses to this month</button>
-      </div>
-    </section>
+    <div class="grid two">
+      <section class="panel">
+        <h2>Recurring expenses</h2>
+        <div id="recurring"></div>
+        <form id="recForm" class="grid" style="gap:8px;margin-top:12px">
+          <input type="number" id="rAmount" class="mono" placeholder="Amount (৳)" min="0" step="0.01" required>
+          <select id="rCategory"></select>
+          <input type="number" id="rDay" class="mono" placeholder="Day of month" min="1" max="31" value="1" required>
+          <input type="text" id="rNote" placeholder="Name, e.g. House rent">
+          <div class="row"><button type="submit">Add</button><button class="ghost" type="button" id="applyRec">Apply to this month</button></div>
+        </form>
+      </section>
 
-    <section class="card">
-      <h2>Recurring income</h2>
-      <div id="recurringIncome"></div>
-      <form id="recIncForm" class="row" style="margin-top:12px">
-        <input type="number" id="riAmount" placeholder="Amount (৳)" min="0" step="0.01" required>
-        <input type="number" id="riDay" placeholder="Day of month" min="1" max="31" value="1" required>
-        <input type="text" id="riNote" placeholder="Name, e.g. Monthly salary">
-        <button type="submit">Add</button>
-      </form>
-      <div class="row" style="margin-top:12px">
-        <button class="ghost" id="applyRecIncome">Add recurring income to this month</button>
-      </div>
-    </section>
+      <section class="panel">
+        <h2>Recurring income</h2>
+        <div id="recurringIncome"></div>
+        <form id="recIncForm" class="grid" style="gap:8px;margin-top:12px">
+          <input type="number" id="riAmount" class="mono" placeholder="Amount (৳)" min="0" step="0.01" required>
+          <input type="number" id="riDay" class="mono" placeholder="Day of month" min="1" max="31" value="1" required>
+          <input type="text" id="riNote" placeholder="Name, e.g. Monthly salary">
+          <div class="row"><button type="submit">Add</button><button class="ghost" type="button" id="applyRecIncome">Apply to this month</button></div>
+        </form>
+      </section>
+    </div>
   </div>
 
   <p id="status" class="muted"></p>
@@ -162,10 +166,10 @@ const pad = n => String(n).padStart(2, "0");
 const todayISO = () => { const d = new Date(); return `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}`; };
 const fmt = n => "৳" + Number(n || 0).toLocaleString("en-US", { maximumFractionDigits: 2 });
 const sum = arr => arr.reduce((s, x) => s + Number(x.amount), 0);
-const setStatus = (msg, isErr) => { const s = $("status"); s.textContent = msg || ""; s.style.color = isErr ? "#dc2626" : ""; };
+const setStatus = (msg, isErr) => { const s = $("status"); s.textContent = msg || ""; s.style.color = isErr ? "var(--danger)" : ""; };
 const onErr = e => setStatus(e.message, true);
 
-// ----- Dark mode -----
+// ----- Theme (dark by default; choice is remembered on this device) -----
 function applyTheme(t) {
   document.documentElement.dataset.theme = t;
   $("themeBtn").textContent = t === "dark" ? "Light" : "Dark";
@@ -173,8 +177,7 @@ function applyTheme(t) {
 function initTheme() {
   let saved = null;
   try { saved = localStorage.getItem("theme"); } catch (e) {}
-  const systemDark = window.matchMedia && matchMedia("(prefers-color-scheme: dark)").matches;
-  applyTheme(saved || (systemDark ? "dark" : "light"));
+  applyTheme(saved || "dark");
 }
 $("themeBtn").onclick = () => {
   const next = document.documentElement.dataset.theme === "dark" ? "light" : "dark";
@@ -300,10 +303,10 @@ function buildCategoryRows() {
     const row = document.createElement("div");
     row.className = "catrow";
     row.innerHTML = `
-      <div class="item" style="border:0;padding:4px 0">
+      <div class="item" style="border:0;padding:2px 0">
         <span style="flex:1">${c}</span>
-        <span class="muted" id="s-${c}"></span>
-        <input type="number" min="0" step="1" placeholder="Budget" id="b-${c}" style="max-width:120px">
+        <span class="muted mono" id="s-${c}"></span>
+        <input type="number" min="0" step="1" placeholder="Budget" id="b-${c}" class="mono" style="max-width:120px">
       </div>
       <div class="bar"><div id="bar-${c}"></div></div>`;
     wrap.appendChild(row);
@@ -330,7 +333,7 @@ function renderMonth() {
     const budget = Number(budgets[c]) || 0;
     let text = fmt(spent);
     if (budget) {
-      text += ` / ${fmt(budget)} ` + (spent > budget ? `(over by ${fmt(spent - budget)})` : `(left ${fmt(budget - spent)})`);
+      text += ` / ${fmt(budget)} ` + (spent > budget ? `· over ${fmt(spent - budget)}` : `· left ${fmt(budget - spent)}`);
     }
     $("s-" + c).textContent = text;
     // With a budget: bar = share of budget used. Without: bar = share of this month's spending.
