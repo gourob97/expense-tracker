@@ -456,6 +456,7 @@ function placeAccount() {
   if (top + ht > innerHeight - 8) top = Math.max(8, r.top - ht - 8);
   d.style.left = left + "px";
   d.style.top = top + "px";
+  d.style.setProperty("--panel-origin", `${top > r.top ? "top" : "bottom"} ${fromSide ? "left" : "right"}`);
 }
 window.addEventListener("resize", placeAccount);
 $("accountDialog").addEventListener("close", () => {
@@ -701,9 +702,13 @@ $("entryCancel").onclick = () => closeDialog($("entryDialog"));
 $("entryDialog").addEventListener("click", e => { if (e.target === e.currentTarget) closeDialog(e.currentTarget); });
 $("entryForm").addEventListener("submit", e => { e.preventDefault(); guard(submitEntry)(); });
 
-let submitting = false;
-async function submitEntry() {
-  if (submitting || "leaving" in $("entryDialog").dataset) return; // Enter during the closing animation
+// A write lands in the local cache at once, and the snapshot listeners update the screen from there; its promise
+// settles only when the server acknowledges it, which can take seconds, or never while offline. So the sheet closes
+// and confirms straight away, and a write the server rejects surfaces later as an error toast.
+const writeInBackground = p => { p.catch(onErr); };
+
+function submitEntry() {
+  if ("leaving" in $("entryDialog").dataset) return; // Enter while the sheet animates out
   const amount = parseNum($("eAmount").value);
   if (!(amount > 0)) { toast(t("invalidAmount"), { error: true }); $("eAmount").focus(); return; }
   const editingRule = !!editing && isRuleCol(editing.col);
@@ -712,37 +717,36 @@ async function submitEntry() {
   const note = $("eNote").value.trim();
   const category = $("eCatGrid").querySelector("input:checked")?.value || categories[0];
   const repeat = !editing && entryKind !== "planned" && $("eRepeat").checked;
-  submitting = true; $("entrySubmit").disabled = true;
-  try {
-    if (editing) { await saveEdit({ amount, date, note, category }); return; }
-    let msg;
-    if (entryKind === "planned") {
-      await addDoc(userCol("planned"), { amount, category, date, note, createdAt: Date.now() });
-      msg = t("plannedAdded");
-    } else {
-      const isIncome = entryKind === "income";
-      let recurringId = null;
-      // A repeating entry creates its rule first, so this month's entry is linked and "Add all" won't duplicate it
-      if (repeat) {
-        const day = Number(date.slice(8, 10));
-        const rule = isIncome ? { amount, day, note } : { amount, category, day, note };
-        recurringId = (await addDoc(userCol(isIncome ? "recurringIncome" : "recurring"), rule)).id;
-      }
-      const data = { amount, date, note, recurringId, createdAt: Date.now() };
-      if (!isIncome) data.category = category;
-      await addDoc(userCol(isIncome ? "income" : "expenses"), data);
-      msg = t(isIncome ? (repeat ? "incomeAddedRec" : "incomeAdded") : (repeat ? "expenseAddedRec" : "expenseAdded"));
+  if (editing) { saveEdit({ amount, date, note, category }); return; }
+  // Close before writing, so the totals and bars visibly update as the sheet leaves
+  closeDialog($("entryDialog"));
+  let msg;
+  if (entryKind === "planned") {
+    writeInBackground(addDoc(userCol("planned"), { amount, category, date, note, createdAt: Date.now() }));
+    msg = t("plannedAdded");
+  } else {
+    const isIncome = entryKind === "income";
+    let recurringId = null;
+    // A repeating entry also creates its rule, linked by id so "Add all" won't duplicate this month's entry.
+    // The id is generated locally, so neither write waits for the other.
+    if (repeat) {
+      const day = Number(date.slice(8, 10));
+      const rule = isIncome ? { amount, day, note } : { amount, category, day, note };
+      const ruleRef = doc(userCol(isIncome ? "recurringIncome" : "recurring"));
+      recurringId = ruleRef.id;
+      writeInBackground(setDoc(ruleRef, rule));
     }
-    closeDialog($("entryDialog"));
-    setMonth(periodOf(date, startDay));
-    toast(msg);
-  } finally {
-    submitting = false; $("entrySubmit").disabled = false;
+    const data = { amount, date, note, recurringId, createdAt: Date.now() };
+    if (!isIncome) data.category = category;
+    writeInBackground(addDoc(userCol(isIncome ? "income" : "expenses"), data));
+    msg = t(isIncome ? (repeat ? "incomeAddedRec" : "incomeAdded") : (repeat ? "expenseAddedRec" : "expenseAdded"));
   }
+  setMonth(periodOf(date, startDay));
+  toast(msg);
 }
 
 // Updates the item being edited; only the fields the sheet shows are touched (createdAt, recurringId stay)
-async function saveEdit({ amount, date, note, category }) {
+function saveEdit({ amount, date, note, category }) {
   const { col, item } = editing;
   const rule = isRuleCol(col);
   const changes = { amount, note };
@@ -752,12 +756,12 @@ async function saveEdit({ amount, date, note, category }) {
   if (Object.keys(changes).every(k => changes[k] === (item[k] ?? (k === "note" ? "" : undefined)))) return;
   const uid = user.uid, { id, ...before } = item;
   const ref = doc(db, "users", uid, col, id);
-  await updateDoc(ref, changes);
+  writeInBackground(updateDoc(ref, changes));
   if (!rule) setMonth(periodOf(date, startDay));
-  toast(t(rule ? "ruleUpdated" : "entryUpdated"), { actionLabel: t("undo"), onAction: guard(async () => {
-    await setDoc(ref, before);
+  toast(t(rule ? "ruleUpdated" : "entryUpdated"), { actionLabel: t("undo"), onAction: () => {
+    writeInBackground(setDoc(ref, before));
     toast(t("restored"));
-  }) });
+  } });
 }
 
 // Keyboard: N = new entry, / = search (desktop). Ignored while typing or when a dialog is open.
@@ -879,8 +883,10 @@ function setAmount(el, value, format, animate) {
   shownAmounts.set(el, state);
   if (!animate || from == null || from === value) { el.textContent = format(value); return; }
   state.value = from;
-  const start = performance.now(), duration = 450;
+  const duration = 700;
+  let start; // from the first frame's timestamp, which can be earlier than performance.now() here
   const step = now => {
+    start ??= now;
     const p = Math.min(1, (now - start) / duration);
     state.value = p < 1 ? from + (value - from) * (1 - (1 - p) ** 3) : value; // ease-out cubic
     el.textContent = format(p < 1 ? Math.round(state.value) : value);
@@ -898,7 +904,7 @@ function animateBars(animate) {
     if (!to) return;
     const from = prev.get(key) || "0%";
     barWidths.set(key, to);
-    if (animate && from !== to) el.animate([{ width: from }, { width: to }], { duration: 400, easing: EASE_OUT });
+    if (animate && from !== to) el.animate([{ width: from }, { width: to }], { duration: 700, easing: EASE_OUT });
   });
 }
 

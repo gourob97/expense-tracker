@@ -14,7 +14,7 @@
   --r-xl: 22px; --r-lg: 18px; --r-md: 14px; --r-sm: 10px;
   --nav-h: 84px;
   /* Motion: short for feedback, longer for things that travel. JS mirrors --ease-out (EASE_OUT in app.js). */
-  --dur-fast: 120ms; --dur: 200ms; --dur-sheet: 320ms;
+  --dur-fast: 120ms; --dur: 200ms; --dur-enter: 280ms; --dur-sheet: 340ms;
   --ease-out: cubic-bezier(.2, .8, .2, 1); --ease-in: cubic-bezier(.4, 0, 1, 1);
   --ease-sheet: cubic-bezier(.32, .72, 0, 1);
   color-scheme: dark;
@@ -619,25 +619,31 @@ dialog[open]::backdrop { animation: fade-in var(--dur) var(--ease-out) }
 dialog[data-leaving]::backdrop { animation: fade-out var(--dur-fast) var(--ease-in) forwards }
 dialog.sheet[open], dialog.account-panel[open] { animation: sheet-in var(--dur-sheet) var(--ease-sheet) }
 dialog.sheet[data-leaving], dialog.account-panel[data-leaving] { animation: sheet-out var(--dur) var(--ease-in) forwards }
-dialog.confirm[open] { animation: pop-in var(--dur) var(--ease-out) }
-dialog.confirm[data-leaving] { animation: pop-out var(--dur-fast) var(--ease-in) forwards }
+dialog.confirm[open] { animation: rise-in var(--dur-enter) var(--ease-out) }
+dialog.confirm[data-leaving] { animation: sink-out var(--dur) var(--ease-in) forwards }
 /* A closing dialog ignores taps: no second submit or toggle while it animates out */
 dialog[data-leaving] { pointer-events: none }
 @media (min-width: 600px) {
-  dialog.sheet[open], dialog.account-panel[open] { animation: pop-in var(--dur) var(--ease-out) }
-  dialog.sheet[data-leaving], dialog.account-panel[data-leaving] { animation: pop-out var(--dur-fast) var(--ease-in) forwards }
+  dialog.sheet[open] { animation: rise-in var(--dur-enter) var(--ease-out) }
+  dialog.sheet[data-leaving] { animation: sink-out var(--dur) var(--ease-in) forwards }
+  /* The popover grows out of the corner nearest its button (--panel-origin, set by placeAccount in app.js) */
+  dialog.account-panel { transform-origin: var(--panel-origin, top right) }
+  dialog.account-panel[open] { animation: pop-in var(--dur) var(--ease-out) }
+  dialog.account-panel[data-leaving] { animation: pop-out var(--dur-fast) var(--ease-in) forwards }
 }
 @keyframes sheet-in { from { transform: translateY(100%) } }
 @keyframes sheet-out { to { transform: translateY(100%) } }
-@keyframes pop-in { from { transform: scale(.96); opacity: 0 } }
-@keyframes pop-out { to { transform: scale(.98); opacity: 0 } }
+@keyframes pop-in { from { transform: scale(.9); opacity: 0 } }
+@keyframes pop-out { to { transform: scale(.95); opacity: 0 } }
+@keyframes rise-in { from { transform: translateY(24px) scale(.96); opacity: 0 } }
+@keyframes sink-out { to { transform: translateY(12px) scale(.98); opacity: 0 } }
 @keyframes fade-in { from { opacity: 0 } }
 @keyframes fade-out { to { opacity: 0 } }
 
 /* Toast: rises in, fades out (hideToast in app.js waits for this before hiding it) */
-.toast:not([hidden]) { animation: toast-in var(--dur) var(--ease-out) }
+.toast:not([hidden]) { animation: toast-in var(--dur-enter) var(--ease-sheet) }
 .toast[data-leaving] { animation: toast-out var(--dur-fast) var(--ease-in) forwards }
-@keyframes toast-in { from { opacity: 0; transform: translateY(12px) scale(.98) } }
+@keyframes toast-in { from { opacity: 0; transform: translateY(24px) scale(.96) } }
 @keyframes toast-out { to { opacity: 0; transform: translateY(6px) } }
 
 /* Segmented controls: one thumb slides to the checked option instead of each option lighting up.
