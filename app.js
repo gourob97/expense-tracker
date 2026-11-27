@@ -899,9 +899,14 @@ function openSheet(kind, col = null, item = null, { personId = null, dir = null 
   setKind(kind); // after the fields are filled: it refreshes everything that depends on them
   $("entryTitle").textContent = t(!item ? "newEntry" : rule ? "editRecurring" : loanEdit ? "editLoan" : "editEntry");
   openDialog($("entryDialog"));
-  $("eAmount").focus();
-  if ($("eAmount").value) $("eAmount").select();
+  // With a mouse or trackpad there's no on-screen keyboard, so typing can start at once. On touch screens focusing
+  // the amount would throw the keyboard up over the sheet before anything is picked; it opens when the amount is tapped.
+  if (finePointer.matches) {
+    $("eAmount").focus();
+    if ($("eAmount").value) $("eAmount").select();
+  }
 }
+const finePointer = matchMedia("(pointer: fine)");
 const openEntry = (kind = KIND_FOR_TAB[currentTab]) => openSheet(kind, null, null, kind === "loan" ? { personId: selectedPerson } : {});
 const openEdit = (col, item) => openSheet(COL_KIND[col], col, item);
 const openLoanSheet = ({ personId = null, dir = null, txn = null } = {}) => openSheet("loan", txn ? "loanTxns" : null, txn, { personId, dir });
