@@ -10,10 +10,11 @@
 *{box-sizing:border-box}
 body{margin:0;font-family:ui-sans-serif,system-ui,-apple-system,"Segoe UI",sans-serif;background:var(--bg);color:var(--text);font-size:14px;line-height:1.4}
 .num,.mono{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-variant-numeric:tabular-nums}
-header{display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap;padding:14px 20px;border-bottom:1px solid var(--line)}
+header{display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap;padding:max(14px,env(safe-area-inset-top)) max(20px,env(safe-area-inset-right)) 14px max(20px,env(safe-area-inset-left));border-bottom:1px solid var(--line)}
+#who{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 h1{font-size:13px;letter-spacing:.14em;text-transform:uppercase;margin:0;font-weight:600}
 h2{font-size:11px;letter-spacing:.12em;text-transform:uppercase;color:var(--muted);font-weight:600;margin:0 0 12px}
-main{max-width:1000px;margin:0 auto;padding:20px;display:grid;gap:12px}
+main{max-width:1000px;margin:0 auto;padding:20px max(20px,env(safe-area-inset-right)) 20px max(20px,env(safe-area-inset-left));display:grid;gap:12px}
 .panel{background:var(--panel);border:1px solid var(--line);border-radius:4px;padding:16px}
 .grid{display:grid;gap:12px}
 @media(min-width:800px){.grid.two{grid-template-columns:1fr 1fr;align-items:start}}
@@ -28,7 +29,8 @@ input:focus,select:focus{outline:1px solid var(--accent);border-color:var(--acce
 .row>button{flex:0 0 auto}
 .muted{color:var(--muted);font-size:12px}
 .stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:12px}
-.stat .v{font-size:22px;font-weight:600;margin-top:4px}
+.stat{min-width:0}
+.stat .v{font-size:clamp(16px,1.8vw,20px);font-weight:600;margin-top:4px;overflow-wrap:anywhere}
 .bar{height:4px;background:var(--line);margin-top:6px}
 .bar>div{height:100%;background:var(--accent)}
 .bar>div.over{background:var(--danger)}
@@ -42,6 +44,8 @@ input:focus,select:focus{outline:1px solid var(--accent);border-color:var(--acce
 .catrow:last-child{border-bottom:0}
 .chip{display:inline-flex;align-items:center;gap:6px;border:1px solid var(--line);border-radius:3px;padding:3px 4px 3px 8px;font-size:12px}
 .chip button{padding:0 6px;background:transparent;color:var(--muted);border:0;font-size:14px;line-height:1}
+.notice{border:1px solid var(--accent);border-radius:3px;padding:10px 12px;margin:0 0 12px;font-size:12px}
+.notice p{margin:0 0 8px}
 .hidden{display:none!important}
 #status{position:fixed;left:50%;bottom:16px;transform:translateX(-50%);z-index:20;max-width:calc(100% - 32px);font-size:12px;background:var(--panel);border:1px solid var(--line);border-radius:4px;padding:8px 12px;box-shadow:0 4px 16px rgba(0,0,0,.25);cursor:pointer}
 #status:empty{display:none}
@@ -55,10 +59,27 @@ input:focus,select:focus{outline:1px solid var(--accent);border-color:var(--acce
 @media(min-width:800px){.grid.two>.span2{grid-row:span 2}}
 @media(max-width:599px){
   main{padding-bottom:calc(76px + env(safe-area-inset-bottom))}
-  .tabs{position:fixed;left:0;right:0;top:auto;bottom:0;gap:0;background:var(--panel);border-bottom:0;border-top:1px solid var(--line);padding-bottom:env(safe-area-inset-bottom)}
+  .tabs{position:fixed;left:0;right:0;top:auto;bottom:0;gap:0;background:var(--panel);border-bottom:0;border-top:1px solid var(--line);padding:0 env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left)}
   .tab{flex-direction:column;justify-content:flex-start;gap:4px;padding:10px 2px 12px;border-bottom:0;border-top:2px solid transparent}
   .tab[aria-current="page"]{border-top-color:var(--accent)}
   #status{bottom:calc(72px + env(safe-area-inset-bottom))}
+  #who{max-width:45vw}
+  .stats{grid-template-columns:1fr 1fr}
+  .stats .stat:last-child{grid-column:1/-1}
+  .stat .v{font-size:clamp(16px,5vw,20px)}
+  .entry{flex-wrap:wrap;row-gap:6px}
+  .entry .info{flex:1 1 0}
+  .entry .amt{flex:0 0 auto}
+  .entry .actions{flex:1 0 100%;justify-content:flex-end}
+  .catline{flex-wrap:wrap;row-gap:2px}
+  .catline .spent{order:3;flex:1 0 100%}
+}
+/* Touch devices: 16px fields stop iOS zooming on focus; larger tap targets */
+@media(pointer:coarse){
+  input,select{font-size:16px}
+  button.small{min-height:40px;padding:6px 12px;font-size:12px}
+  .chip button{min-width:36px;min-height:36px}
+  .item .actions{gap:8px}
 }
 </style>
 </head>
@@ -80,6 +101,10 @@ input:focus,select:focus{outline:1px solid var(--accent);border-color:var(--acce
   <section id="loginCard" class="panel">
     <h2>Sign in</h2>
     <p class="muted" style="margin:0 0 12px">Your data syncs to your Google account.</p>
+    <div id="inAppNotice" class="notice hidden">
+      <p>Google sign-in doesn't work inside this app's built-in browser. Open this page in Chrome or Safari.</p>
+      <div class="row"><button type="button" class="ghost" id="copyLinkBtn">Copy link</button><button type="button" class="ghost hidden" id="openChromeBtn">Open in Chrome</button></div>
+    </div>
     <button id="signInBtn">Sign in with Google</button>
   </section>
 
@@ -273,6 +298,26 @@ function initTabs() {
 }
 initTabs();
 
+// ----- In-app browsers (Messenger, Facebook, Instagram, Android webviews): Google blocks OAuth there -----
+const isInAppBrowser = ua => /FBAN|FBAV|FB_IAB|Instagram|Messenger|Line\/|MicroMessenger|; wv\)/.test(ua);
+function initInAppNotice() {
+  const ua = navigator.userAgent;
+  if (!isInAppBrowser(ua)) return;
+  $("inAppNotice").classList.remove("hidden");
+  $("copyLinkBtn").onclick = async () => {
+    try { await navigator.clipboard.writeText(location.href); setStatus("Link copied. Paste it into Chrome or Safari."); }
+    catch (e) { setStatus("Couldn't copy. Copy the address from the menu instead.", true); }
+  };
+  if (/Android/.test(ua)) {
+    const b = $("openChromeBtn");
+    b.classList.remove("hidden");
+    b.onclick = () => {
+      location.href = `intent://${location.host}${location.pathname}${location.search}#Intent;scheme=https;package=com.android.chrome;end`;
+    };
+  }
+}
+initInAppNotice();
+
 // ----- State -----
 let selectedMonth = todayISO().slice(0, 7);
 let user = null;
@@ -422,13 +467,13 @@ function buildCategoryRows() {
     row.className = "catrow";
 
     const line = document.createElement("div");
-    line.className = "item";
+    line.className = "item catline";
     line.style.cssText = "border:0;padding:2px 0";
     const name = document.createElement("span");
     name.style.flex = "1";
     name.textContent = c;
     const spent = document.createElement("span");
-    spent.className = "muted mono";
+    spent.className = "muted mono spent";
     spent.id = "s-" + c;
     const input = document.createElement("input");
     input.type = "number";
@@ -561,7 +606,7 @@ function renderRows(boxId, items, emptyMsg) {
   box.className = "";
   items.forEach(it => {
     const row = document.createElement("div");
-    row.className = "item";
+    row.className = "item entry";
     const info = document.createElement("div");
     info.className = "info";
     const t = document.createElement("div");
