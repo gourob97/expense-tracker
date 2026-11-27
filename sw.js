@@ -1,7 +1,7 @@
 // Network-first app shell: always fresh when online, cached copy when offline.
 // Firestore and auth traffic is never intercepted (Firestore has its own offline cache).
-const CACHE = "ledger-v1";
-const SHELL = ["./", "./index.html", "./styles.css", "./app.js", "./i18n.js", "./manifest.webmanifest", "./icon.svg", "./icon-192.png"];
+const CACHE = "ledger-v2";
+const SHELL = ["./", "./index.html", "./styles.css", "./app.js", "./i18n.js", "./period.js", "./manifest.webmanifest", "./icon.svg", "./icon-192.png"];
 
 self.addEventListener("install", e => {
   e.waitUntil(caches.open(CACHE).then(c => c.addAll(SHELL)).then(() => self.skipWaiting()));

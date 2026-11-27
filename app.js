@@ -5,6 +5,7 @@ import {
   collection, doc, addDoc, deleteDoc, setDoc, onSnapshot, query, where, orderBy
 } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
 import { STRINGS, CAT_BN } from "./i18n.js";
+import { periodRange, periodOf, shiftPeriod, dateInPeriod, addDays, daysBetween, inPeriod, isPeriodKey, normalizeStartDay, DEFAULT_START_DAY } from "./period.js";
 
 // ===== FIREBASE WEB CONFIG =====
 const firebaseConfig = {
@@ -48,7 +49,8 @@ const ICONS = {
   moon: '<path d="M20 14.5A8 8 0 1 1 9.5 4a6.5 6.5 0 0 0 10.5 10.5z"/>',
   globe: '<circle cx="12" cy="12" r="9"/><path d="M3 12h18"/><path d="M12 3c2.5 2.7 3.8 5.7 3.8 9s-1.3 6.3-3.8 9c-2.5-2.7-3.8-5.7-3.8-9S9.5 5.7 12 3z"/>',
   logout: '<path d="M15 4h4v16h-4"/><path d="M10 8l-4 4 4 4"/><path d="M6 12h10"/>',
-  plus: '<path d="M12 5v14"/><path d="M5 12h14"/>'
+  plus: '<path d="M12 5v14"/><path d="M5 12h14"/>',
+  calendar: '<rect x="3" y="5" width="18" height="16" rx="2"/><path d="M3 10h18"/><path d="M8 3v4"/><path d="M16 3v4"/>'
 };
 function svg(name, size = 20) {
   const tpl = document.createElement("template");
@@ -105,6 +107,16 @@ const fmt = n => "৳" + numFmt.format(Number(n || 0));
 const signed = n => (n < 0 ? "−" : "") + fmt(Math.abs(n));
 const fmtDate = iso => dateFmt.format(parseISO(iso));
 const monthName = ym => { const [y, m] = ym.split("-").map(Number); return new Date(y, m - 1, 1).toLocaleString(LOCALES[lang], { month: "long", year: "numeric" }); };
+// "November 2026" for calendar months, otherwise "25 Nov – 24 Dec" (year shown only when the period is outside the current year)
+function periodLabel(key, sd = startDay) {
+  if (sd === 1) return monthName(key);
+  const { start, end } = periodRange(key, sd);
+  const year = String(new Date().getFullYear());
+  const opts = { day: "numeric", month: "short" };
+  if (!start.startsWith(year) && !end.startsWith(year)) opts.year = "numeric";
+  const f = new Intl.DateTimeFormat(LOCALES[lang], opts);
+  return f.formatRange ? f.formatRange(parseISO(start), parseISO(end)) : `${f.format(parseISO(start))} – ${f.format(parseISO(end))}`;
+}
 function dayLabel(iso) {
   const today = new Date(); const yest = new Date(today.getFullYear(), today.getMonth(), today.getDate() - 1);
   if (iso === isoOf(today)) return `${t("today")} · ${fmtDate(iso)}`;
@@ -194,7 +206,13 @@ matchMedia("(prefers-color-scheme: light)").addEventListener?.("change", e => {
 });
 
 // ----- State -----
-let selectedMonth = todayISO().slice(0, 7);
+// Day the user's budget month starts (salary day). Synced per account; cached on this device so the first paint is right.
+const CYCLE_KEY = "cycleStartDay";
+const cachedStartDay = () => { try { return normalizeStartDay(localStorage.getItem(CYCLE_KEY)); } catch (e) { return DEFAULT_START_DAY; } };
+let startDay = cachedStartDay();
+// Key of the period being viewed: "YYYY-MM" of the month it starts in (see period.js)
+let selectedMonth = periodOf(todayISO(), startDay);
+const currentRange = () => periodRange(selectedMonth, startDay);
 let user = null;
 let categories = [...DEFAULT_CATEGORIES];
 let expenses = [], income = [], planned = [], budgets = {}, recurring = [], recurringIncome = [];
@@ -228,17 +246,29 @@ window.addEventListener("hashchange", () => {
 
 // ----- Month switching -----
 function setMonth(ym) {
-  if (!/^\d{4}-\d{2}$/.test(ym) || ym === selectedMonth) return;
+  if (!isPeriodKey(ym) || ym === selectedMonth) return;
   selectedMonth = ym;
   $("month").value = ym;
   filterCat = null;
   renderAll();
   if (user) subscribeMonth();
 }
-function shiftMonth(delta) {
-  const [y, m] = selectedMonth.split("-").map(Number);
-  const d = new Date(y, m - 1 + delta, 1);
-  setMonth(`${d.getFullYear()}-${pad(d.getMonth() + 1)}`);
+const shiftMonth = delta => setMonth(shiftPeriod(selectedMonth, delta));
+
+// Re-maps the viewed period when the start day changes: stays on "now" if viewing it, otherwise on the period
+// that overlaps the old one most (the one containing its midpoint)
+function applyStartDay(next) {
+  next = normalizeStartDay(next);
+  try { if (next === DEFAULT_START_DAY) localStorage.removeItem(CYCLE_KEY); else localStorage.setItem(CYCLE_KEY, String(next)); } catch (e) {}
+  if (next === startDay) return;
+  const old = currentRange(), today = todayISO();
+  const anchor = inPeriod(today, old) ? today : addDays(old.start, Math.floor(old.days / 2));
+  startDay = next;
+  selectedMonth = periodOf(anchor, startDay);
+  $("month").value = selectedMonth;
+  filterCat = null;
+  renderAll();
+  if (user) subscribeMonth();
 }
 $("prevMonth").onclick = () => shiftMonth(-1);
 $("nextMonth").onclick = () => shiftMonth(1);
@@ -253,12 +283,14 @@ function openAccountMenu(anchor) {
   if (user) items.push({ header: user.email || user.displayName || "" });
   items.push({ icon: dark ? "sun" : "moon", label: t(dark ? "themeToLight" : "themeToDark"), onSelect: toggleTheme });
   items.push({ icon: "globe", label: lang === "en" ? "বাংলা" : "English", lang: lang === "en" ? "bn" : "en", onSelect: toggleLang });
+  if (user) items.push({ icon: "calendar", label: t("cycleMenu", { day: fmtInt(startDay) }), onSelect: openCycleDialog });
   if (user) items.push({ icon: "logout", label: t("signOut"), onSelect: guard(signOutAndClear) });
   openMenu(anchor, items);
 }
 // Sign out and wipe this device's offline copy of the data, so the next person on a shared browser can't read it
 async function signOutAndClear() {
   await signOut(auth);
+  try { localStorage.removeItem(CYCLE_KEY); } catch (e) {}
   try { await terminate(db); await clearIndexedDbPersistence(db); }
   catch (e) { /* another tab still holds the cache; it is cleared once that tab signs out or closes */ }
   location.reload();
@@ -278,6 +310,29 @@ function confirmAction(message, yesLabel) {
     d.showModal();
     $("confirmNo").focus();
   });
+}
+
+// ----- Month start day -----
+function openCycleDialog() {
+  const d = $("cycleDialog"), sel = $("cycleDay");
+  sel.replaceChildren(...Array.from({ length: 31 }, (_, i) => i + 1).map(n =>
+    h("option", { value: n, text: n === 1 ? t("cycleCalendar", { day: fmtInt(n) }) : fmtInt(n) })));
+  sel.value = String(startDay);
+  const preview = () => { $("cyclePreview").textContent = t("cyclePreview", { range: periodLabel(periodOf(todayISO(), Number(sel.value)), Number(sel.value)) }); };
+  sel.onchange = preview;
+  preview();
+  $("cycleCancel").onclick = () => d.close();
+  d.onclick = e => { if (e.target === d) d.close(); };
+  $("cycleSave").onclick = guard(async () => {
+    const day = normalizeStartDay(sel.value);
+    d.close();
+    if (day === startDay) return;
+    applyStartDay(day); // optimistic; the snapshot listener confirms
+    await setDoc(userDoc("settings", "preferences"), { cycleStartDay: day }, { merge: true });
+    toast(t("cycleSaved", { day: fmtInt(day) }));
+  });
+  d.showModal();
+  sel.focus();
 }
 
 $("accountBtn").onclick = e => openAccountMenu(e.currentTarget);
@@ -343,8 +398,8 @@ function buildCatGrid() {
   }));
   if (!grid.querySelector("input:checked")) grid.querySelector("input")?.click();
 }
-// Default date: today when viewing the current month, otherwise the 1st of the viewed month
-const defaultDate = () => (todayISO().startsWith(selectedMonth) ? todayISO() : `${selectedMonth}-01`);
+// Default date: today when viewing the current period, otherwise the first day of the viewed period
+const defaultDate = () => { const r = currentRange(), today = todayISO(); return inPeriod(today, r) ? today : r.start; };
 
 function openEntry(kind = KIND_FOR_TAB[currentTab]) {
   if (!user) return;
@@ -396,7 +451,7 @@ async function submitEntry() {
       msg = t(isIncome ? (repeat ? "incomeAddedRec" : "incomeAdded") : (repeat ? "expenseAddedRec" : "expenseAdded"));
     }
     $("entryDialog").close();
-    setMonth(date.slice(0, 7));
+    setMonth(periodOf(date, startDay));
     toast(msg);
   } finally {
     submitting = false; $("entrySubmit").disabled = false;
@@ -431,6 +486,7 @@ function init() {
     stopListeners();
     closeMenu(false);
     if ($("entryDialog").open) $("entryDialog").close();
+    if ($("cycleDialog").open) $("cycleDialog").close();
     if (u) {
       document.body.dataset.auth = "in";
       subscribeAll();
@@ -439,6 +495,7 @@ function init() {
       expenses = []; income = []; planned = []; budgets = {}; recurring = []; recurringIncome = [];
       categories = [...DEFAULT_CATEGORIES];
       editingBudgets = false;
+      applyStartDay(DEFAULT_START_DAY);
     }
     renderAll();
   });
@@ -460,14 +517,17 @@ function subscribeAll() {
     budgets = s.exists() ? s.data() : {};
     renderAll();
   }, onErr));
+  unsubs.push(onSnapshot(userDoc("settings", "preferences"), s => {
+    applyStartDay(s.exists() ? s.data().cycleStartDay : DEFAULT_START_DAY);
+  }, onErr));
   unsubs.push(onSnapshot(userCol("recurring"), s => { recurring = mapDocs(s); renderAll(); }, onErr));
   unsubs.push(onSnapshot(userCol("recurringIncome"), s => { recurringIncome = mapDocs(s); renderAll(); }, onErr));
 }
 
-// Listens to expenses, income and planned items for the selected month only
+// Listens to expenses, income and planned items for the selected period only
 function subscribeMonth() {
   monthUnsubs.forEach(f => f()); monthUnsubs = [];
-  const start = `${selectedMonth}-01`, end = `${selectedMonth}-31`;
+  const { start, end } = currentRange();
   const monthQuery = name => query(userCol(name), where("date", ">=", start), where("date", "<=", end), orderBy("date", "desc"));
   monthUnsubs.push(onSnapshot(monthQuery("expenses"), s => { expenses = sortDesc(mapDocs(s)); renderAll(); }, onErr));
   monthUnsubs.push(onSnapshot(monthQuery("income"), s => { income = sortDesc(mapDocs(s)); renderAll(); }, onErr));
@@ -499,7 +559,7 @@ function budgetInfo(c, byCat) {
 }
 
 function renderSummary() {
-  $("monthLabel").textContent = monthName(selectedMonth);
+  $("monthLabel").textContent = periodLabel(selectedMonth);
   const spent = sum(expenses), earned = sum(income), plannedTotal = sum(planned);
   const balance = earned - spent, left = balance - plannedTotal;
   $("leftLabel").textContent = t(left < 0 ? "overPlan" : "leftToSpend");
@@ -812,18 +872,19 @@ function niceCeil(v) {
 }
 function renderChart() {
   const box = $("chart");
-  const [y, m] = selectedMonth.split("-").map(Number);
-  const dim = new Date(y, m, 0).getDate();
+  const range = currentRange(), dim = range.days;
+  const dateAt = i => addDays(range.start, i - 1); // 1-based day of the period → ISO date
   const budgetTotal = categories.reduce((acc, c) => acc + (Number(budgets[c]) || 0), 0);
   $("chartPaceLegend").hidden = !budgetTotal;
   $("chartPaceText").textContent = t("chartPace", { amt: fmt(budgetTotal) });
   if (!expenses.length) { box.replaceChildren(h("p", { class: "muted chart-empty", text: t("noExpenses") })); return; }
 
   const daily = new Array(dim).fill(0);
-  expenses.forEach(e => { const d = Number(e.date.slice(8, 10)); if (d >= 1 && d <= dim) daily[d - 1] += Number(e.amount); });
-  const thisMonth = todayISO().slice(0, 7);
+  expenses.forEach(e => { const i = daysBetween(range.start, e.date); if (i >= 0 && i < dim) daily[i] += Number(e.amount); });
+  const today = todayISO();
   const lastWithData = daily.reduce((acc, v, i) => (v ? i + 1 : acc), 0);
-  const end = Math.max(selectedMonth === thisMonth ? Number(todayISO().slice(8, 10)) : selectedMonth < thisMonth ? dim : 0, lastWithData);
+  const elapsed = inPeriod(today, range) ? daysBetween(range.start, today) + 1 : today > range.end ? dim : 0;
+  const end = Math.max(elapsed, lastWithData);
   const cum = []; daily.slice(0, end).reduce((acc, v, i) => (cum[i] = acc + v), 0);
   const total = cum[end - 1];
   const maxV = niceCeil(Math.max(total, budgetTotal) * 1.05);
@@ -833,13 +894,13 @@ function renderChart() {
   const pts = cum.map((v, i) => `${x(i + 1).toFixed(1)},${yv(v).toFixed(1)}`);
 
   const plot = svgNode("svg", { viewBox: `0 0 ${W} ${H}`, preserveAspectRatio: "none", role: "img",
-    "aria-label": t("chartAria", { amt: fmt(total), date: fmtDate(`${selectedMonth}-${pad(end)}`) }) });
+    "aria-label": t("chartAria", { amt: fmt(total), date: fmtDate(dateAt(end)) }) });
   plot.append(svgNode("path", { class: "chart-area", d: `M0,${H} L${pts.join(" L")} L${x(end).toFixed(1)},${H} Z` }));
   if (budgetTotal) plot.append(svgNode("line", { class: "chart-pace", x1: 0, y1: H, x2: W, y2: yv(budgetTotal).toFixed(1), "vector-effect": "non-scaling-stroke" }));
   plot.append(svgNode("polyline", { class: "chart-line", points: pts.join(" "), "vector-effect": "non-scaling-stroke" }));
 
   const leftPct = x(end) / W * 100, topPct = yv(total) / H * 100;
-  const tip = h("div", { class: "chart-tip", style: `left:${leftPct}%;top:${topPct}%`, text: t("chartBy", { amt: fmt(total), date: fmtDate(`${selectedMonth}-${pad(end)}`) }) });
+  const tip = h("div", { class: "chart-tip", style: `left:${leftPct}%;top:${topPct}%`, text: t("chartBy", { amt: fmt(total), date: fmtDate(dateAt(end)) }) });
   if (leftPct < 30) tip.style.transform = "translate(0, -135%)";
   const ticks = [4, 3, 2, 1, 0].map(k => compactFmt.format(maxV * k / 4));
   const xDays = [1, 8, 15, 22, dim];
@@ -852,7 +913,7 @@ function renderChart() {
         h("span", { class: "chart-dot", style: `left:${leftPct}%;top:${topPct}%`, "aria-hidden": "true" }),
         tip)),
     h("div", { class: "chart-x", "aria-hidden": "true" }, xDays.map((d, i) =>
-      h("span", { text: i === 0 || i === xDays.length - 1 ? fmtDate(`${selectedMonth}-${pad(d)}`) : fmtInt(d) }))));
+      h("span", { text: i === 0 || i === xDays.length - 1 ? fmtDate(dateAt(d)) : fmtInt(Number(dateAt(d).slice(8, 10))) }))));
 }
 
 // ===== Writes =====
@@ -920,22 +981,19 @@ async function removeCategory(name) {
   }) });
 }
 
-// Creates one entry per recurring rule for the selected month, skipping any already created
+// Creates one entry per recurring rule for the selected period, skipping any already created
 async function applyRecurringTo(rules, col, existing, kind) {
-  const [y, m] = selectedMonth.split("-").map(Number);
-  const daysInMonth = new Date(y, m, 0).getDate();
-  const month = selectedMonth;
+  const key = selectedMonth, sd = startDay;
   let added = 0;
   for (const r of rules) {
     if (existing.some(x => x.recurringId === r.id)) continue;
-    const day = Math.min(r.day, daysInMonth);
     await addDoc(userCol(col), {
       amount: r.amount, category: r.category || "Income", note: r.note || "",
-      date: `${month}-${pad(day)}`, recurringId: r.id, createdAt: Date.now()
+      date: dateInPeriod(key, r.day, sd), recurringId: r.id, createdAt: Date.now()
     });
     added++;
   }
-  toast(added ? t("applied" + kind, { n: fmtInt(added), month: monthName(month) }) : t("nothing" + kind));
+  toast(added ? t("applied" + kind, { n: fmtInt(added), month: periodLabel(key, sd) }) : t("nothing" + kind));
 }
 
 // ===== Start (last, so every helper above is initialised) =====

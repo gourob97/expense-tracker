@@ -59,7 +59,11 @@ export const STRINGS = {
     movedToExpenses: "Moved to expenses.",
     appliedExp: "Added {n} recurring expense(s) to {month}.", appliedInc: "Added {n} recurring income entr(ies) to {month}.",
     nothingExp: "Nothing to add: recurring expenses already applied, or none set up.",
-    nothingInc: "Nothing to add: recurring income already applied, or none set up."
+    nothingInc: "Nothing to add: recurring income already applied, or none set up.",
+    cycleMenu: "Month starts on day {day}", cycleTitle: "Month start day", cycleDay: "Starts on day",
+    cycleCalendar: "{day} (calendar month)", cyclePreview: "Current period: {range}",
+    cycleHint: "Pick the earliest day your salary can arrive. In shorter months, the last day is used. Past months are regrouped too; entries don’t change.",
+    cycleSaved: "Month now starts on day {day}.", save: "Save"
   },
   bn: {
     docTitle: "খরচের খাতা", appTitle: "খরচের খাতা", loading: "লোড হচ্ছে…",
@@ -120,7 +124,11 @@ export const STRINGS = {
     movedToExpenses: "খরচে সরানো হয়েছে।",
     appliedExp: "{month}-এ {n}টি নিয়মিত খরচ যোগ হয়েছে।", appliedInc: "{month}-এ {n}টি নিয়মিত আয় যোগ হয়েছে।",
     nothingExp: "যোগ করার কিছু নেই: নিয়মিত খরচ আগেই যোগ হয়েছে, অথবা কোনোটি ঠিক করা নেই।",
-    nothingInc: "যোগ করার কিছু নেই: নিয়মিত আয় আগেই যোগ হয়েছে, অথবা কোনোটি ঠিক করা নেই।"
+    nothingInc: "যোগ করার কিছু নেই: নিয়মিত আয় আগেই যোগ হয়েছে, অথবা কোনোটি ঠিক করা নেই।",
+    cycleMenu: "মাস শুরু: {day} তারিখ", cycleTitle: "মাস শুরুর তারিখ", cycleDay: "শুরুর তারিখ",
+    cycleCalendar: "{day} (ক্যালেন্ডার মাস)", cyclePreview: "চলতি সময়কাল: {range}",
+    cycleHint: "বেতন সবচেয়ে আগে যে তারিখে আসতে পারে, সেটি বেছে নিন। ছোট মাসে শেষ দিনটি ধরা হবে। আগের মাসগুলোও নতুন করে ভাগ হবে; এন্ট্রি বদলাবে না।",
+    cycleSaved: "মাস এখন {day} তারিখ থেকে শুরু।", save: "সংরক্ষণ"
   }
 };
 

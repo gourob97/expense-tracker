@@ -116,8 +116,8 @@ body:not([data-auth="loading"]) .when-loading, body:not([data-auth="setup"]) .wh
 .logo { width: 32px; height: 32px; border-radius: 9px; background: var(--accent); color: var(--accent-ink); display: inline-flex; align-items: center; justify-content: center; flex: 0 0 auto }
 .logo.big { width: 56px; height: 56px; border-radius: 16px }
 .page-title { display: none; font-size: 28px; font-weight: 700; letter-spacing: -.03em }
-.month-switch { display: flex; align-items: center }
-.month-btn { min-height: 44px; padding: 0 4px; border: 0; background: transparent; font-size: 17px; font-weight: 600; letter-spacing: -.01em; white-space: nowrap; border-radius: 10px }
+.month-switch { display: flex; align-items: center; min-width: 0 }
+.month-btn { min-height: 44px; min-width: 0; padding: 0 4px; border: 0; background: transparent; font-size: 17px; font-weight: 600; letter-spacing: -.01em; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; border-radius: 10px }
 .month-btn:hover { background: var(--surface-2) }
 .search { display: none }
 .add-btn { display: none }
@@ -523,3 +523,10 @@ dialog.confirm::backdrop { background: rgba(0, 0, 0, .55) }
 dialog.confirm p { margin: 0 0 18px; font-size: 15px }
 .btn-row.end { justify-content: flex-end }
 .btn.danger { background: var(--danger); color: var(--danger-ink) }
+
+/* Month start day dialog */
+.dialog-title { font-size: 17px; font-weight: 600; margin: 0 0 14px }
+.field-row select { flex: 1; min-width: 0; border: 0; background: transparent; font-size: 15px; font-weight: 500; text-align: right; text-align-last: right; padding: 8px 0; outline: none; cursor: pointer }
+.field-row:focus-within { box-shadow: inset 0 0 0 2px var(--accent) }
+.cycle-preview { margin: 14px 0 6px !important; font-weight: 600 }
+dialog.confirm .hint { margin: 0 0 18px }

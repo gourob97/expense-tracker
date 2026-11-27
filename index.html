@@ -274,6 +274,19 @@ try {
   </div>
 </dialog>
 
+<dialog id="cycleDialog" class="confirm" aria-labelledby="cycleTitle" aria-describedby="cycleHint">
+  <h2 id="cycleTitle" class="dialog-title" data-i18n="cycleTitle">Month start day</h2>
+  <div class="field-group">
+    <label class="field-row"><span data-i18n="cycleDay">Starts on day</span><select id="cycleDay"></select></label>
+  </div>
+  <p class="cycle-preview" id="cyclePreview"></p>
+  <p class="hint" id="cycleHint" data-i18n="cycleHint">Pick the earliest day your salary can arrive. In shorter months, the last day is used. Past months are regrouped too; entries don’t change.</p>
+  <div class="btn-row end">
+    <button type="button" class="btn secondary" id="cycleCancel" data-i18n="cancel">Cancel</button>
+    <button type="button" class="btn primary" id="cycleSave" data-i18n="save">Save</button>
+  </div>
+</dialog>
+
 <div id="menu" class="menu" role="menu" hidden></div>
 
 <div id="toast" class="toast" role="status" aria-live="polite" hidden>
