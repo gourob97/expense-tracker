@@ -327,6 +327,7 @@ window.addEventListener("hashchange", () => {
 // ----- Month switching -----
 function setMonth(ym, { fromHash = false } = {}) {
   if (!isPeriodKey(ym) || ym === selectedMonth) return;
+  startMonthSlide(ym > selectedMonth ? 1 : -1); // period keys are YYYY-MM, so they compare as strings
   selectedMonth = ym;
   $("month").value = ym;
   filterCat = null;
@@ -583,12 +584,12 @@ function openCycleDialog() {
   preview();
   $("cycleCancel").onclick = () => closeDialog(d);
   d.onclick = e => { if (e.target === d) closeDialog(d); };
-  $("cycleSave").onclick = guard(async () => {
+  $("cycleSave").onclick = guard(() => {
     const day = normalizeStartDay(sel.value);
     closeDialog(d);
     if (day === startDay) return;
     applyStartDay(day); // optimistic; the snapshot listener confirms
-    await setDoc(userDoc("settings", "preferences"), { cycleStartDay: day }, { merge: true });
+    writeInBackground(setDoc(userDoc("settings", "preferences"), { cycleStartDay: day }, { merge: true }));
     toast(t("cycleSaved", { day: fmtInt(day) }));
   });
   openDialog(d);
@@ -814,6 +815,7 @@ function stopListeners() {
   unsubs.forEach(f => f()); unsubs = [];
   monthUnsubs.forEach(f => f()); monthUnsubs = [];
   monthPending = new Set(MONTH_COLS);
+  cancelMonthSlide();
 }
 const mapDocs = s => s.docs.map(d => ({ id: d.id, ...d.data() }));
 
@@ -864,13 +866,141 @@ function renderAll() {
   const animate = settled && lastRenderSettled && !reducedMotion.matches && !document.hidden;
   lastRenderSettled = settled;
   renderSummary(animate);
-  renderLists();
+  renderLists(animate);
   renderBudgets();
   renderSide();
   renderChart();
   renderBadges();
   renderAccount();
   animateBars(animate);
+  pulseNewlyOver(animate);
+  if (settled && monthSlide) finishMonthSlide();
+}
+
+// ----- List motion. Rows are rebuilt on every render, so arrivals and departures are found by data-key: a new key
+// grows in from zero height, a vanished one goes back in as an inert ghost that collapses away, and a row whose
+// content changed flashes. Animating height lets everything below follow the layout, with no per-row offsets.
+const LIST_IDS = ["list", "incomeList", "plannedList", "recurring", "recurringIncome"];
+const LIST_MS = 260;
+const keyedChildren = el => (el ? [...el.children].filter(c => c.dataset.key) : []);
+// Grouped lists are day groups (keyed) holding rows (keyed); flat lists are rows only
+function captureList(box) {
+  return keyedChildren(box).map(node => {
+    const inner = node.querySelector(":scope > .day-rows");
+    return { key: node.dataset.key, node, text: node.textContent, inner, children: inner ? captureLevel(inner) : null };
+  });
+}
+const captureLevel = el => keyedChildren(el).map(node => ({ key: node.dataset.key, node, text: node.textContent }));
+
+function animateList(box, before) {
+  const after = captureList(box);
+  diffLevel(box, before, after);
+  // The last item went: it collapses above the empty state, which grows in (diffLevel put the ghosts first)
+  const empty = box.querySelector(":scope > .empty");
+  if (empty && before.length) growIn(empty);
+}
+function diffLevel(parent, before, after) {
+  const now = new Map(after.map(i => [i.key, i]));
+  const old = new Map(before.map(i => [i.key, i]));
+  // Departed items go back where they were: before the next item that is still there, else at the end
+  // (or, when nothing is left, above the empty state)
+  const end = after.length ? null : parent.firstElementChild;
+  const ghosts = before.filter(i => !now.has(i.key)).map(i => {
+    const next = before.slice(before.indexOf(i) + 1).find(j => now.has(j.key));
+    makeGhost(i.node);
+    parent.insertBefore(i.node, next ? now.get(next.key).node : end);
+    return i.node;
+  });
+  after.forEach(i => {
+    const was = old.get(i.key);
+    if (!was) { growIn(i.node); (i.children ? i.children.map(c => c.node) : [i.node]).forEach(flashRow); }
+    else if (i.children) diffLevel(i.inner, was.children, i.children);
+    else if (was.text !== i.text) flashRow(i.node);
+  });
+  ghosts.forEach(collapseOut);
+}
+function makeGhost(node) {
+  node.inert = true;
+  node.setAttribute("aria-hidden", "true");
+  [node, ...node.querySelectorAll("[data-key]")].forEach(n => n.removeAttribute("data-key")); // never captured again
+}
+// Box metrics animated alongside height, so a row with padding and a min-height can reach zero
+const BOX_PROPS = ["minHeight", "paddingTop", "paddingBottom", "borderTopWidth"];
+const boxFrame = (el, height, opacity) => {
+  const cs = getComputedStyle(el), f = { height: height + "px", opacity };
+  BOX_PROPS.forEach(p => { f[p] = cs[p]; });
+  return f;
+};
+const zeroFrame = { height: "0px", opacity: 0, minHeight: "0px", paddingTop: "0px", paddingBottom: "0px", borderTopWidth: "0px" };
+function growIn(el) {
+  const h = el.offsetHeight;
+  if (!h) return; // in a hidden tab
+  el.style.overflow = "hidden";
+  el.animate([zeroFrame, boxFrame(el, h, 1)], { duration: LIST_MS, easing: EASE_OUT })
+    .finished.catch(() => {}).then(() => { el.style.overflow = ""; });
+}
+function collapseOut(el) {
+  const h = el.offsetHeight;
+  if (!h) { el.remove(); return; }
+  el.style.overflow = "hidden";
+  el.animate([boxFrame(el, h, 1), zeroFrame], { duration: LIST_MS, easing: "cubic-bezier(.4, 0, .2, 1)" })
+    .finished.catch(() => {}).then(() => el.remove());
+}
+function flashRow(el) {
+  const soft = getComputedStyle(document.documentElement).getPropertyValue("--accent-soft").trim();
+  el.animate([{ backgroundColor: soft }, { backgroundColor: "rgba(0, 0, 0, 0)" }], { duration: 1400, easing: "ease-in" });
+}
+
+// ----- Over budget: when a change pushes a category over its limit, its bars blink and the Budgets badge pulses -----
+let overBefore = null; // categories over budget at the last render
+function pulseNewlyOver(animate) {
+  const byCat = spentByCategory();
+  const over = new Set(categories.filter(c => budgetInfo(c, byCat).over));
+  const fresh = animate && overBefore ? [...over].filter(c => !overBefore.has(c)) : [];
+  overBefore = over;
+  if (!fresh.length) return;
+  const keys = new Set(fresh.flatMap(c => ["budget:" + c, "watch:" + c]));
+  document.querySelectorAll("[data-bar]").forEach(el => {
+    if (keys.has(el.dataset.bar)) el.animate([{ opacity: 1 }, { opacity: .25 }, { opacity: 1 }], { duration: 450, iterations: 2, delay: 450 });
+  });
+  $("badge-budgets").animate([{ transform: "scale(1)" }, { transform: "scale(1.6)" }, { transform: "scale(1)" }], { duration: 450, iterations: 2, easing: "ease-in-out" });
+}
+
+// ----- Month change: the current month slides out at once; the new one slides in when its data has arrived -----
+let monthSlide = null; // { dir, out, timer } while a month change waits for its data
+function startMonthSlide(dir) {
+  cancelMonthSlide();
+  if (!user || reducedMotion.matches || document.hidden) return;
+  const out = $("appCards").animate([{ opacity: 1, transform: "none" }, { opacity: 0, transform: `translateX(${-dir * 24}px)` }],
+    { duration: 140, easing: "cubic-bezier(.4, 0, 1, 1)", fill: "forwards" });
+  // If the data is slow (or a listener fails), show what there is rather than a blank page
+  monthSlide = { dir, out, timer: setTimeout(finishMonthSlide, 1500) };
+}
+function finishMonthSlide() {
+  if (!monthSlide) return;
+  const { dir, out, timer } = monthSlide;
+  monthSlide = null;
+  clearTimeout(timer);
+  // Let the slide-out finish first; a newer month change cancels it, which skips this one
+  out.finished.then(() => {
+    out.cancel();
+    $("appCards").animate([{ opacity: 0, transform: `translateX(${dir * 24}px)` }, { opacity: 1, transform: "none" }],
+      { duration: 260, easing: EASE_OUT });
+    drawChartIn();
+  }, () => {});
+}
+function cancelMonthSlide() {
+  if (!monthSlide) return;
+  clearTimeout(monthSlide.timer);
+  monthSlide.out.cancel();
+  monthSlide = null;
+}
+// The spending line reveals left to right, then its end dot and label appear
+function drawChartIn() {
+  document.querySelectorAll(".chart-plot > svg").forEach(el => el.animate(
+    [{ clipPath: "inset(0 100% 0 0)" }, { clipPath: "inset(0 0 0 0)" }], { duration: 650, delay: 120, easing: EASE_OUT, fill: "backwards" }));
+  document.querySelectorAll(".chart-plot > .chart-dot, .chart-plot > .chart-tip").forEach(el => el.animate(
+    [{ opacity: 0 }, { opacity: 1 }], { duration: 200, delay: 700, fill: "backwards" }));
 }
 
 // ----- Animated amounts: a changed total counts from the value on screen to the new one -----
@@ -980,21 +1110,34 @@ function emptyState({ msg, actionLabel, onAction }) {
   return h("div", { class: "empty" }, h("p", { text: msg }),
     actionLabel ? h("button", { type: "button", class: "btn secondary small", onclick: onAction }, svg("plus", 16), actionLabel) : null);
 }
+// Every snapshot re-renders everything, so a container whose output wouldn't change keeps its nodes: rebuilding it
+// would cut off animations still running there (and do needless work). Each one remembers what it last showed.
+const lastRendered = new WeakMap();
+function unchanged(box, ...inputs) {
+  const sig = JSON.stringify(inputs);
+  if (lastRendered.get(box) === sig) return true;
+  lastRendered.set(box, sig);
+  return false;
+}
+
 function renderGrouped(boxId, items, rowFn, empty) {
   const box = $(boxId);
+  if (unchanged(box, items, lang, todayISO(), empty.msg, empty.actionLabel)) return; // today's date: "Today" labels
   if (!items.length) { box.replaceChildren(emptyState(empty)); return; }
-  box.replaceChildren(...groupByDate(items).map(g => h("div", { class: "day-group" },
+  box.replaceChildren(...groupByDate(items).map(g => h("div", { class: "day-group", "data-key": "day:" + g.date },
     h("div", { class: "day-head" }, h("span", { text: dayLabel(g.date) }), h("span", { class: "num", text: fmt(g.total) })),
     h("div", { class: "day-rows" }, g.items.map(rowFn)))));
 }
 function renderFlat(boxId, items, rowFn, emptyMsg) {
   const box = $(boxId);
+  if (unchanged(box, items, lang, emptyMsg)) return;
   box.replaceChildren(...(items.length ? items.map(rowFn) : [emptyState({ msg: emptyMsg })]));
 }
 
 // onOpen: tapping the row (outside its buttons) opens the editor; the ⋯ menu's Edit does the same for keyboard users
-function entryRow({ icon, title, sub, amount, amountClass = "", menu, extra, onOpen }) {
-  return h("div", { class: onOpen ? "row tappable" : "row", onclick: onOpen ? e => { if (!e.target.closest("button")) onOpen(); } : null },
+// key: "<collection>:<id>", which list motion uses to tell arriving and departing rows apart
+function entryRow({ key, icon, title, sub, amount, amountClass = "", menu, extra, onOpen }) {
+  return h("div", { class: onOpen ? "row tappable" : "row", "data-key": key, onclick: onOpen ? e => { if (!e.target.closest("button")) onOpen(); } : null },
     icon,
     h("div", { class: "row-info" }, h("div", { class: "row-title", text: title }), sub ? h("div", { class: "row-sub", text: sub }) : null),
     h("span", { class: `row-amt num ${amountClass}`, text: amount }),
@@ -1007,6 +1150,7 @@ const deleteItem = (col, item, msgKey) => [editItem(col, item), { icon: "trash",
 const incomeIcon = () => h("span", { class: "cat-icon tone-5" }, svg("income"));
 
 const expenseRow = e => entryRow({
+  key: "expenses:" + e.id,
   icon: catIcon(e.category),
   title: e.note || catLabel(e.category),
   sub: [e.note ? catLabel(e.category) : null, e.recurringId ? t("monthly") : null].filter(Boolean).join(" · "),
@@ -1014,6 +1158,7 @@ const expenseRow = e => entryRow({
   menu: deleteItem("expenses", e, "deletedExpense"), onOpen: () => openEdit("expenses", e)
 });
 const incomeRow = i => entryRow({
+  key: "income:" + i.id,
   icon: incomeIcon(),
   title: i.note || t("income"),
   sub: i.recurringId ? t("monthly") : "",
@@ -1021,6 +1166,7 @@ const incomeRow = i => entryRow({
   menu: deleteItem("income", i, "deletedIncome"), onOpen: () => openEdit("income", i)
 });
 const plannedRow = p => entryRow({
+  key: "planned:" + p.id,
   icon: catIcon(p.category),
   title: p.note || catLabel(p.category),
   sub: p.note ? catLabel(p.category) : "",
@@ -1030,6 +1176,7 @@ const plannedRow = p => entryRow({
   menu: deleteItem("planned", p, "deletedPlanned"), onOpen: () => openEdit("planned", p)
 });
 const ruleRow = (r, isIncome) => entryRow({
+  key: (isIncome ? "recurringIncome:" : "recurring:") + r.id,
   icon: isIncome ? incomeIcon() : catIcon(r.category),
   title: r.note || (isIncome ? t("income") : catLabel(r.category)),
   sub: [isIncome ? null : catLabel(r.category), t("dayOfMonth", { day: fmtInt(r.day) })].filter(Boolean).join(" · "),
@@ -1054,7 +1201,8 @@ function renderFilterChips() {
   box.replaceChildren(chip(t("all"), null), ...present.map(c => chip(catLabel(c), c)));
 }
 
-function renderLists() {
+function renderLists(animate = false) {
+  const before = animate ? LIST_IDS.map(id => captureList($(id))) : null;
   renderFilterChips();
   const filtering = Boolean(filterCat || searchQ);
   const exp = expenses.filter(e => (!filterCat || e.category === filterCat) && matchesSearch(e.note, catLabel(e.category), e.category));
@@ -1076,6 +1224,7 @@ function renderLists() {
   renderFlat("recurringIncome", recurringIncome, r => ruleRow(r, true), t("noRecurringIncome"));
   renderRecBanner("recBannerExp", recurring, expenses, "expenses", "Exp");
   renderRecBanner("recBannerInc", recurringIncome, income, "income", "Inc");
+  if (before) LIST_IDS.forEach((id, i) => animateList($(id), before[i]));
 }
 
 // Recurring rules not yet turned into an entry for the viewed month
@@ -1103,6 +1252,7 @@ function renderBudgets() {
   // Summary
   const sumBox = $("budgetSummary");
   if (!budgeted.length) {
+    lastRendered.delete(sumBox);
     sumBox.replaceChildren(
       h("div", { class: "label", text: t("noBudgetsTitle") }),
       h("p", { class: "hint", text: t("noBudgetsHint") }),
@@ -1110,7 +1260,7 @@ function renderBudgets() {
   } else {
     const totalB = budgeted.reduce((s, i) => s + i.b, 0), totalS = budgeted.reduce((s, i) => s + i.s, 0);
     const overN = budgeted.filter(i => i.over).length, nearN = budgeted.filter(i => i.near).length;
-    sumBox.replaceChildren(
+    if (!unchanged(sumBox, budgeted, lang)) sumBox.replaceChildren(
       h("div", { class: "label", text: t("spentAgainst") }),
       h("div", { class: "bs-value" }, h("strong", { class: "num", text: fmt(totalS) }), h("span", { text: t("ofBudget", { budget: fmt(totalB) }) })),
       h("span", { class: "track" }, h("span", { class: `fill ${totalS > totalB ? "over" : "accent"}`, "data-bar": "budget-total", style: `width:${Math.min(100, totalS / totalB * 100)}%` })),
@@ -1122,6 +1272,7 @@ function renderBudgets() {
 
   const list = $("budgetList");
   if (editingBudgets) {
+    lastRendered.delete(list); // so leaving edit mode always rebuilds the read rows
     // Rebuild only when the category set changes, so typing in a field isn't wiped by a snapshot
     const key = categories.join("\u0000") + "|" + lang;
     if (key === budgetEditKey) {
@@ -1135,7 +1286,7 @@ function renderBudgets() {
   budgetEditKey = "";
   const rank = i => (i.over ? 0 : i.near ? 1 : i.b ? 2 : 3);
   const sorted = [...infos].sort((a, b) => rank(a) - rank(b) || (a.b && b.b ? b.ratio - a.ratio : b.s - a.s));
-  list.replaceChildren(...sorted.map(budgetReadRow));
+  if (!unchanged(list, sorted, lang)) list.replaceChildren(...sorted.map(budgetReadRow));
 }
 
 function budgetReadRow(i) {
@@ -1195,7 +1346,8 @@ function renderSide() {
   // Where it went: top 5 categories plus the rest
   const entries = Object.entries(byCat).sort((a, b) => b[1] - a[1]);
   const where = $("where");
-  if (!total) where.replaceChildren(h("p", { class: "hint", text: t("noExpenses") }));
+  if (unchanged(where, entries, lang)) { /* same breakdown: keep the nodes */ }
+  else if (!total) where.replaceChildren(h("p", { class: "hint", text: t("noExpenses") }));
   else {
     const top = entries.slice(0, 5), rest = entries.slice(5);
     const restSum = rest.reduce((s, [, v]) => s + v, 0);
@@ -1217,7 +1369,7 @@ function renderSide() {
   // Budget watch: over or close to the limit
   const watch = categories.map(c => budgetInfo(c, byCat)).filter(i => i.over || i.near).sort((a, b) => b.ratio - a.ratio).slice(0, 3);
   $("watchCard").hidden = !watch.length;
-  $("watch").replaceChildren(...watch.map(i => h("div", { class: "watch-item" },
+  if (!unchanged($("watch"), watch, lang)) $("watch").replaceChildren(...watch.map(i => h("div", { class: "watch-item" },
     h("div", { class: "brow-line" }, h("span", { class: "brow-name", text: catLabel(i.c) }),
       h("span", { class: "brow-amt num" }, fmt(i.s), h("span", { class: "of", text: " / " + fmt(i.b) }))),
     h("span", { class: "track" }, h("span", { class: `fill ${i.over ? "over" : "near"}`, "data-bar": "watch:" + i.c, style: `width:${Math.min(100, i.ratio * 100)}%` })),
@@ -1248,6 +1400,7 @@ function renderChart() {
   const budgetTotal = categories.reduce((acc, c) => acc + (Number(budgets[c]) || 0), 0);
   $("chartPaceLegend").hidden = $("mChartPaceLegend").hidden = !budgetTotal;
   $("chartPaceText").textContent = $("mChartPaceText").textContent = t("chartPace", { amt: fmt(budgetTotal) });
+  if (unchanged(box, expenses.map(e => [e.date, e.amount]), budgetTotal, range, lang, todayISO())) return;
   if (!expenses.length) { box.replaceChildren(h("p", { class: "muted chart-empty", text: t("noExpenses") })); return; }
 
   const daily = new Array(dim).fill(0);
@@ -1291,27 +1444,31 @@ function renderChart() {
 // ===== Writes =====
 
 // Delete immediately and offer Undo, which restores the same document id and data
-async function deleteWithUndo(col, item, msg) {
+function deleteWithUndo(col, item, msg) {
   const uid = user.uid;
   const { id, ...data } = item;
-  await deleteDoc(doc(db, "users", uid, col, id));
-  toast(msg, { actionLabel: t("undo"), onAction: guard(async () => {
-    await setDoc(doc(db, "users", uid, col, id), data);
+  writeInBackground(deleteDoc(doc(db, "users", uid, col, id)));
+  toast(msg, { actionLabel: t("undo"), onAction: () => {
+    writeInBackground(setDoc(doc(db, "users", uid, col, id), data));
     toast(t("restored"));
-  }) });
+  } });
 }
 
-// Turns a planned item into a real expense, then removes it from the plan
-async function markSpent(p) {
-  await addDoc(userCol("expenses"), {
+// Turns a planned item into a real expense and removes it from the plan. A second tap on the same item (before the
+// re-render replaces its button) is ignored, so it can't become two expenses.
+const markedSpent = new Set();
+function markSpent(p) {
+  if (markedSpent.has(p.id)) return;
+  markedSpent.add(p.id);
+  writeInBackground(addDoc(userCol("expenses"), {
     amount: p.amount, category: p.category, date: p.date,
     note: p.note || "", recurringId: null, createdAt: Date.now()
-  });
-  await deleteDoc(userDoc("planned", p.id));
+  }));
+  writeInBackground(deleteDoc(userDoc("planned", p.id)));
   toast(t("movedToExpenses"));
 }
 
-async function saveBudget(c, input) {
+function saveBudget(c, input) {
   const raw = input.value.trim();
   const next = { ...budgets };
   if (raw === "") {
@@ -1323,17 +1480,17 @@ async function saveBudget(c, input) {
     if (Number(budgets[c]) === v) return;
     next[c] = v;
   }
-  await setDoc(userDoc("settings", "budgets"), next);
+  writeInBackground(setDoc(userDoc("settings", "budgets"), next));
   toast(t("budgetSaved"));
 }
 
-async function addCategory(input) {
+function addCategory(input) {
   const name = input.value.trim();
   if (!name) return;
   // Match against both the stored name and its Bangla label, so "খাবার" can't duplicate "Food"
   const lower = name.toLowerCase();
   if (categories.some(c => c.toLowerCase() === lower || CAT_BN[c] === name)) { toast(t("catExists", { name }), { error: true }); return; }
-  await setDoc(userDoc("settings", "categories"), { list: [...categories, name] });
+  writeInBackground(setDoc(userDoc("settings", "categories"), { list: [...categories, name] }));
   input.value = "";
   toast(t("catAdded", { name }));
 }
@@ -1343,26 +1500,30 @@ async function removeCategory(name) {
   if (!(await confirmAction(t("confirmRemoveCat", { name: catLabel(name) }), t("remove")))) return;
   const uid = user.uid, index = categories.indexOf(name), prevBudget = budgets[name];
   const catRef = doc(db, "users", uid, "settings", "categories"), budRef = doc(db, "users", uid, "settings", "budgets");
-  await setDoc(catRef, { list: categories.filter(c => c !== name) });
-  if (prevBudget !== undefined) { const next = { ...budgets }; delete next[name]; await setDoc(budRef, next); }
-  toast(t("catRemoved", { name: catLabel(name) }), { actionLabel: t("undo"), onAction: guard(async () => {
+  writeInBackground(setDoc(catRef, { list: categories.filter(c => c !== name) }));
+  if (prevBudget !== undefined) { const next = { ...budgets }; delete next[name]; writeInBackground(setDoc(budRef, next)); }
+  toast(t("catRemoved", { name: catLabel(name) }), { actionLabel: t("undo"), onAction: () => {
     // Restore against the current state so edits made in between are kept
-    if (!categories.includes(name)) { const list = [...categories]; list.splice(Math.min(index, list.length), 0, name); await setDoc(catRef, { list }); }
-    if (prevBudget !== undefined) await setDoc(budRef, { ...budgets, [name]: prevBudget });
+    if (!categories.includes(name)) { const list = [...categories]; list.splice(Math.min(index, list.length), 0, name); writeInBackground(setDoc(catRef, { list })); }
+    if (prevBudget !== undefined) writeInBackground(setDoc(budRef, { ...budgets, [name]: prevBudget }));
     toast(t("restored"));
-  }) });
+  } });
 }
 
-// Creates one entry per recurring rule for the selected period, skipping any already created
-async function applyRecurringTo(rules, col, existing, kind) {
+// Creates one entry per recurring rule for the selected period, skipping any already created. Rules applied in this
+// session are remembered too, so a second tap before the banner re-renders can't create duplicates.
+const appliedRules = new Set();
+function applyRecurringTo(rules, col, existing, kind) {
   const key = selectedMonth, sd = startDay;
   let added = 0;
   for (const r of rules) {
-    if (existing.some(x => x.recurringId === r.id)) continue;
-    await addDoc(userCol(col), {
+    const tag = `${col}:${r.id}:${key}:${sd}`;
+    if (existing.some(x => x.recurringId === r.id) || appliedRules.has(tag)) continue;
+    appliedRules.add(tag);
+    writeInBackground(addDoc(userCol(col), {
       amount: r.amount, category: r.category || "Income", note: r.note || "",
       date: dateInPeriod(key, r.day, sd), recurringId: r.id, createdAt: Date.now()
-    });
+    }));
     added++;
   }
   toast(added ? t("applied" + kind, { n: fmtInt(added), month: periodLabel(key, sd) }) : t("nothing" + kind));
