@@ -19,14 +19,14 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      # 22+ loads period.js (ES module syntax, .js extension, no package.json) without extra flags
+      # 22+ loads period.js and loans.js (ES module syntax, .js extension, no package.json) without extra flags
       - uses: actions/setup-node@v4
         with:
           node-version: 22
       - name: Syntax check the scripts
         run: |
           # .mjs copies so node parses them as ES modules
-          for f in app.js i18n.js period.js; do cp "$f" "$RUNNER_TEMP/${f%.js}.mjs"; node --check "$RUNNER_TEMP/${f%.js}.mjs"; done
+          for f in app.js i18n.js period.js loans.js; do cp "$f" "$RUNNER_TEMP/${f%.js}.mjs"; node --check "$RUNNER_TEMP/${f%.js}.mjs"; done
           node --check sw.js
           node -e 'JSON.parse(require("fs").readFileSync("manifest.webmanifest", "utf8"))'
       - name: Unit tests

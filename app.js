@@ -2,11 +2,12 @@ import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.2/fireba
 import { getAuth, GoogleAuthProvider, signInWithPopup, signOut, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js";
 import {
   initializeFirestore, getFirestore, persistentLocalCache, persistentMultipleTabManager, terminate, clearIndexedDbPersistence,
-  collection, doc, onSnapshot, query, where, orderBy, getDoc, getDocs, waitForPendingWrites,
+  collection, doc, onSnapshot, query, where, orderBy, getDoc, getDocs, waitForPendingWrites, writeBatch,
   addDoc as fsAddDoc, deleteDoc as fsDeleteDoc, setDoc as fsSetDoc, updateDoc as fsUpdateDoc
 } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
 import { STRINGS, CAT_BN } from "./i18n.js";
 import { periodRange, periodOf, shiftPeriod, dateInPeriod, addDays, daysBetween, inPeriod, isPeriodKey, normalizeStartDay, DEFAULT_START_DAY } from "./period.js";
+import { balances, totals, flowBetween, history as personHistory, balanceWith, findPerson, cleanName } from "./loans.js";
 
 // ===== FIREBASE WEB CONFIG =====
 const firebaseConfig = {
@@ -18,7 +19,7 @@ const firebaseConfig = {
 // ===============================
 
 const DEFAULT_CATEGORIES = ["Food", "Transport", "Bills", "Rent", "Shopping", "Health", "Entertainment", "Other"];
-const TABS = ["expenses", "income", "planned", "budgets"];
+const TABS = ["expenses", "income", "planned", "budgets", "loans"];
 const NEAR_LIMIT = 0.9;
 
 const $ = id => document.getElementById(id);
@@ -60,6 +61,15 @@ const tracked = fn => (...args) => {
   return p;
 };
 const addDoc = tracked(fsAddDoc), setDoc = tracked(fsSetDoc), updateDoc = tracked(fsUpdateDoc), deleteDoc = tracked(fsDeleteDoc);
+// Runs ops (each `batch => batch.set/delete(...)`) as atomic batches; Firestore caps a batch at 500 writes
+const commitBatch = tracked(b => b.commit());
+function writeAll(ops) {
+  for (let i = 0; i < ops.length; i += 450) {
+    const b = writeBatch(db);
+    ops.slice(i, i + 450).forEach(op => op(b));
+    writeInBackground(commitBatch(b));
+  }
+}
 
 // ----- Icons (static, trusted markup) -----
 const ICONS = {
@@ -88,7 +98,10 @@ const ICONS = {
   calendar: '<rect x="3" y="5" width="18" height="16" rx="2"/><path d="M3 10h18"/><path d="M8 3v4"/><path d="M16 3v4"/>',
   user: '<circle cx="12" cy="8" r="4"/><path d="M4 21c0-4 4-6 8-6s8 2 8 6"/>',
   download: '<path d="M12 4v11"/><path d="M7 10l5 5 5-5"/><path d="M5 20h14"/>',
-  chevron: '<path d="M9 6l6 6-6 6"/>'
+  chevron: '<path d="M9 6l6 6-6 6"/>',
+  back: '<path d="M15 6l-6 6 6 6"/>',
+  gave: '<path d="M7 17L17 7"/><path d="M9 7h8v8"/>',
+  got: '<path d="M17 7L7 17"/><path d="M15 17H7V9"/>'
 };
 function svg(name, size = 20) {
   const tpl = document.createElement("template");
@@ -198,7 +211,7 @@ function closeDialog(d, { instant = false } = {}) {
 }
 // Esc (and Android back) animate out too. If the browser won't allow the close to be deferred, it closes at once.
 // The confirm dialog handles cancel itself, since it has to resolve its promise.
-["entryDialog", "cycleDialog", "accountDialog"].forEach(id => $(id).addEventListener("cancel", e => {
+["entryDialog", "cycleDialog", "accountDialog", "loanDialog", "nameDialog"].forEach(id => $(id).addEventListener("cancel", e => {
   if (!e.cancelable) return;
   e.preventDefault();
   closeDialog(e.currentTarget);
@@ -274,17 +287,21 @@ const cachedStartDay = () => { try { return normalizeStartDay(localStorage.getIt
 let startDay = cachedStartDay();
 // Key of the period being viewed: "YYYY-MM" of the month it starts in (see period.js).
 // Lives in the URL hash (#/tab?m=YYYY-MM) so reload and back/forward keep it; omitted for the current period.
+// The Loans tab adds the person being viewed (&p=<id>), so back returns from their history to the list.
 const nowPeriod = () => periodOf(todayISO(), startDay);
 function readHash() {
   const [tab, qs = ""] = location.hash.replace(/^#\/?/, "").split("?");
-  const m = new URLSearchParams(qs).get("m");
-  return { tab, month: m && isPeriodKey(m) ? m : null };
+  const params = new URLSearchParams(qs), m = params.get("m"), p = params.get("p");
+  return { tab, month: m && isPeriodKey(m) ? m : null, person: tab === "loans" && p && /^[\w-]{1,64}$/.test(p) ? p : null };
 }
 let selectedMonth = readHash().month || nowPeriod();
+let selectedPerson = readHash().person;
 const currentRange = () => periodRange(selectedMonth, startDay);
 let user = null;
 let categories = [...DEFAULT_CATEGORIES];
 let expenses = [], income = [], planned = [], budgets = {}, recurring = [], recurringIncome = [];
+// Loans are all-time (balances span months), so they load once per sign-in rather than per period
+let people = [], loanTxns = [];
 let unsubs = [], monthUnsubs = [];
 let auth, db;
 let currentTab = "expenses", filterCat = null, searchQ = "", editingBudgets = false, budgetEditKey = "";
@@ -293,17 +310,23 @@ const userCol = name => collection(db, "users", user.uid, name);
 
 // ----- Tabs (state lives in the URL hash as #/name so reload and back/forward work) -----
 const tabFromHash = () => readHash().tab;
-const hashFor = (tab, month) => `#/${tab}` + (month !== nowPeriod() ? `?m=${month}` : "");
+function hashFor(tab, month, person = null) {
+  const q = new URLSearchParams();
+  if (month !== nowPeriod()) q.set("m", month);
+  if (tab === "loans" && person) q.set("p", person);
+  const qs = q.toString();
+  return `#/${tab}` + (qs ? "?" + qs : "");
+}
 // Writes tab + month to the URL. push=true adds a history entry (back returns to the previous month).
 function syncHash(push) {
-  document.querySelectorAll('a[href^="#/"]').forEach(a => { a.href = hashFor(a.getAttribute("href").replace(/^#\/?/, "").split("?")[0], selectedMonth); });
-  const target = hashFor(currentTab, selectedMonth);
+  document.querySelectorAll('a[href^="#/"]:not([data-person])').forEach(a => { a.href = hashFor(a.getAttribute("href").replace(/^#\/?/, "").split("?")[0], selectedMonth); });
+  const target = hashFor(currentTab, selectedMonth, selectedPerson);
   if (location.hash === target) return;
   if (push) location.hash = target; else history.replaceState(history.state, "", target);
 }
-const KIND_FOR_TAB = { expenses: "expense", income: "income", planned: "planned", budgets: "expense" };
-const ADD_LABEL = { expense: "addExpense", income: "addIncome", planned: "addPlanned" };
-const TAB_TITLE = { expenses: "tabExpenses", income: "tabIncome", planned: "tabPlanned", budgets: "tabBudgets" };
+const KIND_FOR_TAB = { expenses: "expense", income: "income", planned: "planned", budgets: "expense", loans: "loan" };
+const ADD_LABEL = { expense: "addExpense", income: "addIncome", planned: "addPlanned", loan: "addLoan" };
+const TAB_TITLE = { expenses: "tabExpenses", income: "tabIncome", planned: "tabPlanned", budgets: "tabBudgets", loans: "tabLoans" };
 function showTab(name) {
   if (!TABS.includes(name)) name = TABS[0];
   currentTab = name;
@@ -317,12 +340,19 @@ function showTab(name) {
   return name;
 }
 window.addEventListener("hashchange", () => {
-  const { tab, month } = readHash(), prevTab = currentTab;
+  const { tab, month, person } = readHash(), prevTab = currentTab, prevPerson = selectedPerson;
   showTab(tab);
+  selectedPerson = currentTab === "loans" ? person : null;
   setMonth(month || nowPeriod(), { fromHash: true });
   syncHash(false); // normalise unknown tabs / stale params
-  if (currentTab !== prevTab && window.scrollY > 0) window.scrollTo({ top: 0 });
+  if (selectedPerson !== prevPerson) renderLists();
+  if ((currentTab !== prevTab || selectedPerson !== prevPerson) && window.scrollY > 0) window.scrollTo({ top: 0 });
 });
+// Opens one person's history (null: back to the list). Pushes a history entry so back returns.
+function openPerson(id) {
+  if (selectedPerson === id && currentTab === "loans") return;
+  location.hash = hashFor("loans", selectedMonth, id);
+}
 
 // ----- Month switching -----
 function setMonth(ym, { fromHash = false } = {}) {
@@ -506,7 +536,7 @@ async function signOutAndClear() {
 
 // ----- Export: CSV of every entry (for spreadsheets) or a JSON backup of everything -----
 const ENTRY_COLS = [["expenses", "expense"], ["income", "income"], ["planned", "planned"]];
-const ALL_COLS = ["expenses", "income", "planned", "recurring", "recurringIncome"];
+const ALL_COLS = ["expenses", "income", "planned", "recurring", "recurringIncome", "people", "loanTxns"];
 const SETTINGS_DOCS = ["categories", "budgets", "preferences"];
 // Quotes when needed; a leading = + - @ is neutralised so spreadsheets don't run a note as a formula
 function csvCell(v) {
@@ -544,9 +574,12 @@ async function exportData(format) {
       download(`expense-ledger-backup-${stamp}.json`, JSON.stringify(out, null, 2), "application/json");
     } else {
       const rows = ENTRY_COLS.flatMap(([n, type]) => data[n].map(e =>
-        [type, e.date || "", e.category || "", Number(e.amount) || 0, e.note || "", e.recurringId ? "yes" : ""]));
+        [type, e.date || "", e.category || "", Number(e.amount) || 0, e.note || "", e.recurringId ? "yes" : "", ""]));
+      // Loan money: "loan gave" (lent, or repaid what you owed) and "loan got" (borrowed, or were repaid)
+      const names = new Map(data.people.map(p => [p.id, p.name]));
+      data.loanTxns.forEach(x => rows.push([`loan ${x.dir}`, x.date || "", "", Number(x.amount) || 0, x.note || "", "", names.get(x.personId) || ""]));
       rows.sort((x, y) => (x[1] < y[1] ? -1 : x[1] > y[1] ? 1 : 0));
-      const lines = [["Type", "Date", "Category", "Amount", "Note", "Recurring"], ...rows].map(r => r.map(csvCell).join(","));
+      const lines = [["Type", "Date", "Category", "Amount", "Note", "Recurring", "Person"], ...rows].map(r => r.map(csvCell).join(","));
       // BOM so Excel reads UTF-8 (Bangla notes) correctly
       download(`expense-ledger-${stamp}.csv`, "\uFEFF" + lines.join("\r\n"), "text/csv;charset=utf-8");
     }
@@ -694,7 +727,7 @@ function openSheet(kind, col, item) {
   $("eAmount").focus();
   if (item) $("eAmount").select();
 }
-const openEntry = (kind = KIND_FOR_TAB[currentTab]) => openSheet(kind);
+const openEntry = (kind = KIND_FOR_TAB[currentTab]) => (kind === "loan" ? openLoanSheet({ personId: selectedPerson }) : openSheet(kind));
 const openEdit = (col, item) => openSheet(COL_KIND[col], col, item);
 $("fab").onclick = () => openEntry();
 $("addBtn").onclick = () => openEntry();
@@ -765,6 +798,135 @@ function saveEdit({ amount, date, note, category }) {
   } });
 }
 
+// ===== Loan sheet (one "gave" or "got" entry with a person; add or edit) =====
+// Set while the sheet is open: { personId, txn }. personId is fixed when opened from a person (or editing);
+// otherwise the person comes from the name field, matched case-insensitively, and is created if new.
+let loanCtx = null;
+const loanDir = () => document.querySelector('input[name="loanDir"]:checked')?.value || "gave";
+
+function openLoanSheet({ personId = null, dir = null, txn = null } = {}) {
+  if (!user) return;
+  closeMenu(false);
+  const st = loanState();
+  if (txn) personId = txn.personId;
+  const entry = personId ? st.byId.get(personId) : null;
+  if (!entry) personId = null;
+  loanCtx = { personId, txn };
+  const balance = entry?.balance || 0;
+  const chosen = txn?.dir || dir || (balance > 0 ? "got" : "gave");
+  document.querySelector(`input[name="loanDir"][value="${chosen}"]`).checked = true;
+  // Tapping the button that settles up pre-fills the outstanding amount (selected, so typing replaces it)
+  const settles = !txn && dir && (dir === "got" ? balance > 0 : balance < 0);
+  $("lAmount").value = txn ? plainFmt.format(txn.amount) : settles ? plainFmt.format(Math.abs(balance)) : "";
+  $("lPerson").value = entry ? entry.person.name : "";
+  $("lPerson").readOnly = !!entry;
+  $("peopleNames").replaceChildren(...st.entries.map(e => h("option", { value: e.person.name })));
+  $("lDate").value = txn ? txn.date : todayISO();
+  $("lNote").value = txn?.note || "";
+  $("loanTitle").textContent = t(txn ? "editLoan" : "newLoan");
+  $("loanSubmit").textContent = t(txn ? "saveChanges" : "save");
+  updateLoanPreview();
+  openDialog($("loanDialog"));
+  $("lAmount").focus();
+  if ($("lAmount").value) $("lAmount").select();
+}
+
+// Live "After this: Rahim owes you ৳3,000" under the fields
+function updateLoanPreview() {
+  if (!loanCtx) return;
+  const dir = loanDir(), amount = parseNum($("lAmount").value), st = loanState();
+  $("lDirHint").textContent = t(dir === "gave" ? "dirHintGave" : "dirHintGot");
+  const person = loanCtx.personId ? st.byId.get(loanCtx.personId)?.person : findPerson(people, $("lPerson").value);
+  const name = person ? person.name : cleanName($("lPerson").value);
+  if (!name || !(amount > 0)) { $("lPreview").textContent = ""; return; }
+  const next = balanceWith(person ? st.byId.get(person.id)?.balance || 0 : 0, { dir, amount }, loanCtx.txn);
+  $("lPreview").textContent = t("previewAfter", { status: statusText(name, next) });
+}
+
+function submitLoan() {
+  if ("leaving" in $("loanDialog").dataset) return;
+  const amount = parseNum($("lAmount").value);
+  if (!(amount > 0)) { toast(t("invalidAmount"), { error: true }); $("lAmount").focus(); return; }
+  const date = $("lDate").value;
+  if (!date) { $("lDate").focus(); return; }
+  const dir = loanDir(), note = $("lNote").value.trim(), { txn } = loanCtx;
+  let person = loanCtx.personId ? people.find(p => p.id === loanCtx.personId) : null;
+  if (txn && !person) { closeDialog($("loanDialog")); toast(t("personGone"), { error: true }); return; } // deleted elsewhere meanwhile
+  const typed = cleanName($("lPerson").value);
+  if (!person && !typed) { toast(t("needName"), { error: true }); $("lPerson").focus(); return; }
+  person ||= findPerson(people, typed);
+  const name = person ? person.name : typed; // an existing person keeps their spelling, whatever was typed
+  closeDialog($("loanDialog"));
+  const uid = user.uid;
+
+  if (txn) {
+    const { id, ...before } = txn;
+    const changes = { dir, amount, date, note };
+    if (Object.keys(changes).every(k => changes[k] === (before[k] ?? (k === "note" ? "" : undefined)))) return;
+    const ref = doc(db, "users", uid, "loanTxns", id);
+    writeInBackground(updateDoc(ref, changes));
+    toast(t("entryUpdated"), { actionLabel: t("undo"), onAction: () => { writeInBackground(setDoc(ref, before)); toast(t("restored")); } });
+    return;
+  }
+  // A new person and their first entry go in one batch, so neither can exist without the other
+  const prev = person ? loanState().byId.get(person.id)?.balance || 0 : 0;
+  const ops = [];
+  let pid = person?.id;
+  if (!pid) {
+    const ref = doc(userCol("people"));
+    pid = ref.id;
+    ops.push(b => b.set(ref, { name, createdAt: Date.now() }));
+  }
+  const txnRef = doc(userCol("loanTxns"));
+  ops.push(b => b.set(txnRef, { personId: pid, dir, amount, date, note, createdAt: Date.now() }));
+  writeAll(ops);
+  toast(t("savedStatus", { status: statusText(name, balanceWith(prev, { dir, amount })) }));
+}
+$("loanCancel").onclick = () => closeDialog($("loanDialog"));
+$("loanDialog").addEventListener("click", e => { if (e.target === e.currentTarget) closeDialog(e.currentTarget); });
+$("loanForm").addEventListener("submit", e => { e.preventDefault(); guard(submitLoan)(); });
+["lAmount", "lPerson"].forEach(id => $(id).addEventListener("input", updateLoanPreview));
+document.querySelectorAll('input[name="loanDir"]').forEach(r => r.addEventListener("change", updateLoanPreview));
+
+function openRename(person) {
+  const d = $("nameDialog"), input = $("nameInput");
+  input.value = person.name;
+  $("nameCancel").onclick = () => closeDialog(d);
+  d.onclick = e => { if (e.target === d) closeDialog(d); };
+  $("nameForm").onsubmit = e => {
+    e.preventDefault();
+    if ("leaving" in d.dataset) return;
+    const name = cleanName(input.value);
+    if (!name) { input.focus(); return; }
+    const clash = findPerson(people, name);
+    if (clash && clash.id !== person.id) { toast(t("nameExists", { name }), { error: true }); input.focus(); return; }
+    closeDialog(d);
+    if (name === person.name) return;
+    writeInBackground(updateDoc(userDoc("people", person.id), { name }));
+    toast(t("renamed"));
+  };
+  openDialog(d);
+  input.focus();
+  input.select();
+}
+
+// Deletes the person and every entry with them; Undo restores all of it with the same ids.
+// Entries go before the person (and come back after it), so a batch split can't leave entries with nobody.
+async function deletePerson(person) {
+  const txns = loanTxns.filter(x => x.personId === person.id);
+  if (!(await confirmAction(t("confirmDelPerson", { name: person.name, n: fmtInt(txns.length) }), t("delete")))) return;
+  const uid = user.uid;
+  const pRef = doc(db, "users", uid, "people", person.id);
+  const { id, ...pData } = person;
+  const saved = txns.map(({ id: tid, ...data }) => [doc(db, "users", uid, "loanTxns", tid), data]);
+  writeAll([...saved.map(([ref]) => b => b.delete(ref)), b => b.delete(pRef)]);
+  if (selectedPerson === person.id) { selectedPerson = null; syncHash(false); renderLists(); }
+  toast(t("deletedPerson", { name: person.name }), { actionLabel: t("undo"), onAction: () => {
+    writeAll([b => b.set(pRef, pData), ...saved.map(([ref, data]) => b => b.set(ref, data))]);
+    toast(t("restored"));
+  } });
+}
+
 // Keyboard: N = new entry, / = search (desktop). Ignored while typing or when a dialog is open.
 document.addEventListener("keydown", e => {
   if (!user || e.metaKey || e.ctrlKey || e.altKey || document.querySelector("dialog[open]")) return;
@@ -794,7 +956,7 @@ function init() {
     stopListeners();
     closeMenu(false);
     // The account changed under them, so they go at once rather than animating over the new state
-    ["entryDialog", "cycleDialog", "accountDialog"].forEach(id => closeDialog($(id), { instant: true }));
+    ["entryDialog", "cycleDialog", "accountDialog", "loanDialog", "nameDialog"].forEach(id => closeDialog($(id), { instant: true }));
     if (u) {
       document.body.dataset.auth = "in";
       subscribeAll();
@@ -803,6 +965,7 @@ function init() {
       document.body.dataset.auth = "out";
       queuedFromBefore = false;
       expenses = []; income = []; planned = []; budgets = {}; recurring = []; recurringIncome = [];
+      people = []; loanTxns = [];
       categories = [...DEFAULT_CATEGORIES];
       editingBudgets = false;
       applyStartDay(DEFAULT_START_DAY);
@@ -815,6 +978,7 @@ function stopListeners() {
   unsubs.forEach(f => f()); unsubs = [];
   monthUnsubs.forEach(f => f()); monthUnsubs = [];
   monthPending = new Set(MONTH_COLS);
+  loansPending = new Set(LOAN_COLS);
   cancelMonthSlide();
 }
 const mapDocs = s => s.docs.map(d => ({ id: d.id, ...d.data() }));
@@ -834,6 +998,11 @@ function subscribeAll() {
   }, onErr));
   unsubs.push(onSnapshot(userCol("recurring"), s => { recurring = mapDocs(s); renderAll(); }, onErr));
   unsubs.push(onSnapshot(userCol("recurringIncome"), s => { recurringIncome = mapDocs(s); renderAll(); }, onErr));
+  loansPending = new Set(LOAN_COLS);
+  const listenLoans = (name, assign) => onSnapshot(userCol(name),
+    s => { assign(mapDocs(s)); loansPending.delete(name); renderAll(); },
+    e => { loansPending.delete(name); onErr(e); });
+  unsubs.push(listenLoans("people", docs => { people = docs; }), listenLoans("loanTxns", docs => { loanTxns = docs; }));
 }
 
 // Listens to expenses, income and planned items for the selected period only
@@ -859,10 +1028,13 @@ const sortAsc = arr => [...arr].sort((a, b) => (a.date || "").localeCompare(b.da
 // renders, so loading and month switches show their numbers at once instead of counting up from zero.
 const MONTH_COLS = ["expenses", "income", "planned"];
 let monthPending = new Set(MONTH_COLS);
+// Loan money counts towards "Left to spend", so the summary is settled only once loans have loaded too
+const LOAN_COLS = ["people", "loanTxns"];
+let loansPending = new Set(LOAN_COLS);
 let lastRenderSettled = false;
 
 function renderAll() {
-  const settled = monthPending.size === 0;
+  const settled = monthPending.size === 0 && loansPending.size === 0;
   const animate = settled && lastRenderSettled && !reducedMotion.matches && !document.hidden;
   lastRenderSettled = settled;
   renderSummary(animate);
@@ -880,7 +1052,7 @@ function renderAll() {
 // ----- List motion. Rows are rebuilt on every render, so arrivals and departures are found by data-key: a new key
 // grows in from zero height, a vanished one goes back in as an inert ghost that collapses away, and a row whose
 // content changed flashes. Animating height lets everything below follow the layout, with no per-row offsets.
-const LIST_IDS = ["list", "incomeList", "plannedList", "recurring", "recurringIncome"];
+const LIST_IDS = ["list", "incomeList", "plannedList", "recurring", "recurringIncome", "loanOpen", "loanSettled", "loanTimeline"];
 const LIST_MS = 260;
 const keyedChildren = el => (el ? [...el.children].filter(c => c.dataset.key) : []);
 // Grouped lists are day groups (keyed) holding rows (keyed); flat lists are rows only
@@ -1049,15 +1221,36 @@ function budgetInfo(c, byCat) {
   return { c, b, s, ratio, over: b > 0 && s > b, near: b > 0 && s <= b && ratio >= NEAR_LIMIT };
 }
 
+// Derived loan state, recomputed only when a loan snapshot replaces one of the arrays
+let loanMemo = null;
+function loanState() {
+  if (loanMemo && loanMemo.people === people && loanMemo.txns === loanTxns) return loanMemo;
+  const entries = balances(people, loanTxns);
+  return (loanMemo = {
+    people, txns: loanTxns, entries, totals: totals(entries),
+    byId: new Map(entries.map(e => [e.person.id, e]))
+  });
+}
+const loanFlowNow = () => { const { start, end } = currentRange(), { byId } = loanState(); return flowBetween(loanTxns, start, end, id => byId.has(id)); };
+
 function renderSummary(animate) {
   $("monthLabel").textContent = periodLabel(selectedMonth);
   const spent = sum(expenses), earned = sum(income), plannedTotal = sum(planned);
-  const balance = earned - spent, left = balance - plannedTotal;
+  // Cash view: loan money that moved this period counts (borrowed/repaid to you in, lent/repaid by you out).
+  // Spending itself is only ever the expenses, so budgets and categories never see loans.
+  const flow = loanFlowNow(), hasLoanFlow = flow.in > 0 || flow.out > 0;
+  const balance = earned - spent + flow.in - flow.out, left = balance - plannedTotal;
   $("leftLabel").textContent = t(left < 0 ? "overPlan" : "leftToSpend");
   setAmount($("leftValue"), left, v => fmt(Math.abs(v)), animate);
   $("leftValue").classList.toggle("neg", left < 0);
-  // How the big number is reached, read top to bottom: balance − planned (or income − spent when nothing is planned)
-  const lines = plannedTotal
+  // How the big number is reached, read top to bottom: balance − planned (or income − spent when nothing is planned).
+  // When loan money moved, it gets its own lines so borrowed cash never hides inside the total.
+  const lines = hasLoanFlow ? [
+    ["heroIncomeSpent", signed(earned - spent), earned - spent < 0 ? "neg" : "pos"],
+    flow.in ? ["heroLoanIn", "+ " + fmt(flow.in), "pos"] : null,
+    flow.out ? ["heroLoanOut", "− " + fmt(flow.out), "spent"] : null,
+    plannedTotal ? ["statPlanned", "− " + fmt(plannedTotal), "planned"] : null
+  ].filter(Boolean) : plannedTotal
     ? [["heroBalance", signed(balance), balance < 0 ? "neg" : "pos"], ["statPlanned", "− " + fmt(plannedTotal), "planned"]]
     : [["statIncome", fmt(earned), "pos"], ["statSpent", "− " + fmt(spent), "spent"]];
   $("leftSub").replaceChildren(...lines.map(([key, amt, tone]) => h("div", { class: `hb-row ${tone}` },
@@ -1082,6 +1275,12 @@ function renderSummary(animate) {
     ? t("kpiSpentSub", { pct: fmtInt(Math.round(spent / earned * 100)), n: fmtInt(expenses.length) })
     : t("entries", { n: fmtInt(expenses.length) });
   $("plannedSub").textContent = t("kpiPlannedSub", { n: fmtInt(planned.length) });
+
+  // Phone entry point to Loans (tablet and desktop have it in the nav)
+  const lt = loanState().totals;
+  $("loansLinkSub").textContent = lt.owedToYou || lt.youOwe
+    ? [lt.owedToYou ? t("linkToGet", { amt: fmt(lt.owedToYou) }) : null, lt.youOwe ? t("linkToGive", { amt: fmt(lt.youOwe) }) : null].filter(Boolean).join(" · ")
+    : t("loansLinkEmpty");
 }
 
 function renderBadges() {
@@ -1089,6 +1288,8 @@ function renderBadges() {
   count("badge-expenses", expenses.length);
   count("badge-income", income.length);
   count("badge-planned", planned.length);
+  const lt = loanState().totals;
+  count("badge-loans", lt.toYouN + lt.youOweN);
   const byCat = spentByCategory();
   const overN = categories.filter(c => budgetInfo(c, byCat).over).length;
   $("badge-budgets").textContent = overN ? fmtInt(overN) : "";
@@ -1224,6 +1425,7 @@ function renderLists(animate = false) {
   renderFlat("recurringIncome", recurringIncome, r => ruleRow(r, true), t("noRecurringIncome"));
   renderRecBanner("recBannerExp", recurring, expenses, "expenses", "Exp");
   renderRecBanner("recBannerInc", recurringIncome, income, "income", "Inc");
+  renderLoans();
   if (before) LIST_IDS.forEach((id, i) => animateList($(id), before[i]));
 }
 
@@ -1241,6 +1443,121 @@ function renderRecBanner(boxId, rules, existing, col, kind) {
       h("div", { class: "rec-sub", text: `${names} · ${fmt(sum(pending))}` })),
     h("button", { type: "button", class: "btn primary", onclick: guard(() => applyRecurringTo(rules, col, existing, kind)) }, t("addAll")));
 }
+
+// ----- Loans: list of people with their balance, or one person's history -----
+const personIcon = p => h("span", { class: `cat-icon person-icon tone-${hashStr(p.id) % 8}`, "aria-hidden": "true", text: ([...cleanName(p.name)][0] || "?").toUpperCase() });
+const peopleText = n => t(new Intl.PluralRules(LOCALES[lang]).select(n) === "one" ? "onePerson" : "nPeople", { n: fmtInt(n) });
+const balanceClass = b => (b > 0 ? "pos" : b < 0 ? "owe" : "settled");
+const balanceLabel = b => t(b > 0 ? "owesYou" : b < 0 ? "youOweThem" : "settled");
+const dirLabel = dir => t(dir === "gave" ? "youGave" : "youGot");
+// "Rahim owes you ৳500" / "You owe Rahim ৳500" / "You and Rahim are settled"
+function statusText(name, balance) {
+  if (balance > 0) return t("statusOwesYou", { name, amt: fmt(balance) });
+  if (balance < 0) return t("statusYouOwe", { name, amt: fmt(-balance) });
+  return t("statusSettled", { name });
+}
+const afterText = b => (b > 0 ? t("afterOwesYou", { amt: fmt(b) }) : b < 0 ? t("afterYouOwe", { amt: fmt(-b) }) : t("afterSettled"));
+
+function renderLoans() {
+  const st = loanState();
+  // A person in the URL who doesn't exist (deleted, or a stale link) falls back to the list once loans have loaded
+  if (selectedPerson && !st.byId.has(selectedPerson) && loansPending.size === 0) {
+    selectedPerson = null;
+    if (currentTab === "loans") syncHash(false);
+  }
+  $("loansOverview").hidden = !!selectedPerson;
+  $("personView").hidden = !selectedPerson;
+  renderLoanOverview(st);
+  renderPersonView(selectedPerson ? st.byId.get(selectedPerson) : null);
+}
+
+// People rows are links (#/loans?p=id), so they work with the keyboard and back/forward
+const personRow = e => h("a", {
+  class: "row tappable person-row", "data-key": "people:" + e.person.id, "data-person": e.person.id,
+  href: hashFor("loans", selectedMonth, e.person.id)
+},
+  personIcon(e.person),
+  h("div", { class: "row-info" }, h("div", { class: "row-title", text: e.person.name }),
+    h("div", { class: "row-sub", text: [balanceLabel(e.balance), e.last ? t("lastOn", { date: fmtDate(e.last) }) : null].filter(Boolean).join(" · ") })),
+  e.balance ? h("span", { class: `row-amt num ${balanceClass(e.balance)}`, text: fmt(Math.abs(e.balance)) }) : null,
+  h("span", { class: "row-chev" }, svg("chevron", 18)));
+
+function renderLoanOverview(st) {
+  const { owedToYou, youOwe, toYouN, youOweN } = st.totals;
+  const tot = $("loanTotals");
+  if (!unchanged(tot, st.totals, lang)) tot.replaceChildren(
+    h("div", { class: "lt-item" }, h("div", { class: "label", text: t("owedToYou") }),
+      h("div", { class: `lt-value num ${owedToYou ? "pos" : ""}`, text: fmt(owedToYou) }), h("div", { class: "lt-sub", text: peopleText(toYouN) })),
+    h("div", { class: "lt-item" }, h("div", { class: "label", text: t("youOwe") }),
+      h("div", { class: `lt-value num ${youOwe ? "owe" : ""}`, text: fmt(youOwe) }), h("div", { class: "lt-sub", text: peopleText(youOweN) })));
+
+  const notes = new Map();
+  loanTxns.forEach(x => { if (x.note) notes.set(x.personId, (notes.get(x.personId) || "") + " " + x.note); });
+  const visible = st.entries.filter(e => matchesSearch(e.person.name, notes.get(e.person.id)));
+  const open = visible.filter(e => e.balance !== 0).sort((a, b) => Math.abs(b.balance) - Math.abs(a.balance) || a.person.name.localeCompare(b.person.name));
+  const settled = visible.filter(e => e.balance === 0).sort((a, b) => (b.last || "").localeCompare(a.last || "") || a.person.name.localeCompare(b.person.name));
+  $("peopleCount").textContent = st.entries.length ? peopleText(st.entries.length) : "";
+
+  const openBox = $("loanOpen"), settledBox = $("loanSettled");
+  const sig = [lang, todayISO(), selectedMonth];
+  if (!st.entries.length) {
+    if (!unchanged(openBox, "none", sig)) openBox.replaceChildren(emptyState({ msg: t("noLoans"), actionLabel: t("addLoan"), onAction: () => openLoanSheet() }));
+  } else if (!visible.length) {
+    if (!unchanged(openBox, "nomatch", sig)) openBox.replaceChildren(emptyState({ msg: t("noMatches") }));
+  } else if (!unchanged(openBox, open, sig)) openBox.replaceChildren(...open.map(personRow));
+  if (!unchanged(settledBox, settled, sig)) settledBox.replaceChildren(...settled.map(personRow));
+  $("settledHead").hidden = !settled.length;
+}
+
+function renderPersonView(entry) {
+  const card = $("personCard"), box = $("loanTimeline");
+  if (!entry) {
+    [card, box].forEach(el => { lastRendered.delete(el); el.replaceChildren(); });
+    $("historyCount").textContent = "";
+    return;
+  }
+  const { person, balance } = entry;
+  // The settling direction is the primary action: "I got" when they owe you, "I gave" when you owe them
+  const action = dir => h("button", {
+    type: "button", class: `btn ${(dir === "got" ? balance > 0 : balance < 0) ? "primary" : "secondary"}`,
+    onclick: () => openLoanSheet({ personId: person.id, dir })
+  }, svg(dir, 18), t(dir === "gave" ? "iGave" : "iGot"));
+  if (!unchanged(card, person, balance, lang, selectedMonth)) card.replaceChildren(
+    h("div", { class: "person-top" },
+      h("a", { class: "back-link", href: hashFor("loans", selectedMonth) }, svg("back", 18), t("peopleTitle")),
+      h("button", { type: "button", class: "icon-btn", "aria-haspopup": "menu", "aria-expanded": "false", "aria-label": t("moreActions", { name: person.name }),
+        onclick: e => openMenu(e.currentTarget, [
+          { icon: "edit", label: t("rename"), onSelect: () => openRename(person) },
+          { icon: "trash", label: t("deletePerson"), danger: true, onSelect: guard(() => deletePerson(person)) }
+        ]) }, svg("more", 20))),
+    h("div", { class: "person-id" }, personIcon(person), h("h2", { class: "person-name", text: person.name })),
+    h("div", { class: "person-bal" },
+      h("div", { class: "label", text: balanceLabel(balance) }),
+      h("div", { class: `person-amt num ${balanceClass(balance)}`, text: fmt(Math.abs(balance)) })),
+    h("div", { class: "person-actions" }, action("gave"), action("got")));
+
+  const hist = personHistory(loanTxns, person.id).reverse(); // newest first
+  $("historyCount").textContent = t("entries", { n: fmtInt(hist.length) });
+  // The empty state's button belongs to this person, so a different person always rebuilds the list
+  if (box.dataset.person !== person.id) { lastRendered.delete(box); box.dataset.person = person.id; }
+  renderGrouped("loanTimeline", hist.filter(x => matchesSearch(x.note, dirLabel(x.dir))), loanTxnRow,
+    searchQ ? { msg: t("noMatches") } : { msg: t("noLoanTxns"), actionLabel: t("addLoan"), onAction: () => openLoanSheet({ personId: person.id }) });
+}
+
+// `after` (running balance) is display-only; strip it before writing the entry back
+const rawTxn = ({ after, ...x }) => x;
+const loanTxnRow = x => entryRow({
+  key: "loanTxns:" + x.id,
+  icon: h("span", { class: `cat-icon ${x.dir === "got" ? "tone-5" : "tone-0"}` }, svg(x.dir)),
+  title: x.note || dirLabel(x.dir),
+  sub: [x.note ? dirLabel(x.dir) : null, afterText(x.after)].filter(Boolean).join(" · "),
+  amount: (x.dir === "got" ? "+" : "−") + fmt(x.amount), amountClass: x.dir === "got" ? "pos" : "",
+  menu: [
+    { icon: "edit", label: t("edit"), onSelect: () => openLoanSheet({ txn: rawTxn(x) }) },
+    { icon: "trash", label: t("delete"), danger: true, onSelect: guard(() => deleteWithUndo("loanTxns", rawTxn(x), t("deletedLoanTxn"))) }
+  ],
+  onOpen: () => openLoanSheet({ txn: rawTxn(x) })
+});
 
 // ----- Budgets -----
 function renderBudgets() {
