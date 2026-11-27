@@ -1733,7 +1733,7 @@ function renderLoanView(st) {
   }
   const { loan, person } = st, due = dueOf(st);
   const pct = Math.round(st.paid / Number(loan.amount) * 100);
-  if (!unchanged(card, loan, person, st.paid, st.settledOn, todayISO(), lang, selectedMonth)) card.replaceChildren(
+  if (!unchanged(card, loan, person, st.paid, st.settledOn, todayISO(), lang, selectedMonth)) card.replaceChildren(...[
     h("div", { class: "person-top" },
       h("a", { class: "back-link", href: hashFor("loans", selectedMonth) }, svg("back", 18), t("tabLoans")),
       h("button", { type: "button", class: "icon-btn", "aria-haspopup": "menu", "aria-expanded": "false", "aria-label": t("moreActions", { name: person.name }),
@@ -1753,7 +1753,8 @@ function renderLoanView(st) {
       due ? h("div", { class: `due-line${isOverdue(due) ? " overdue" : ""}`, text: dueText(due) }) : null,
       st.settled && st.settledOn ? h("div", { class: "due-line", text: t("settledOn", { date: fmtDate(st.settledOn) }) }) : null),
     st.settled ? null : h("div", { class: "person-actions single" },
-      h("button", { type: "button", class: "btn primary", onclick: () => openPaymentSheet({ loanId: loan.id }) }, svg("plus", 18), t("addPayment"))));
+      h("button", { type: "button", class: "btn primary", onclick: () => openPaymentSheet({ loanId: loan.id }) }, svg("plus", 18), t("addPayment")))
+  ].filter(Boolean));
 
   const list = [...st.payments].reverse(); // newest first
   $("historyCount").textContent = list.length ? plural(list.length, "onePayment", "nPayments") : "";
@@ -2010,11 +2011,12 @@ function attachScrub(plot, m) {
       pace = h("div", { class: `sc-pace ${diff > 0 ? "over" : "under"}`,
         text: Math.abs(diff) < 1 ? t("chartOnPace") : t(diff > 0 ? "chartOver" : "chartUnder", { amt: fmt(Math.abs(diff)) }) });
     }
-    card.replaceChildren(
+    // replaceChildren would print a null as the text "null", so leave missing parts out
+    card.replaceChildren(...[
       h("div", { class: "sc-date", text: dayLabel(m.dateAt(d)) }),
       h("div", { class: "sc-day", text: spent ? `${t("chartDayAmt", { amt: fmt(spent) })} · ${plural(n, "chartOneExp", "chartNExp")}` : t("chartNoSpend") }),
       h("div", { class: "sc-total", text: t("chartSoFar", { amt: fmt(total) }) }),
-      pace);
+      pace].filter(Boolean));
     plot.classList.add("scrubbing");
     // Beside the line: to its right if the card fits there, else to its left, always inside the chart
     const pw = plot.clientWidth, cw = card.offsetWidth, gx = leftPct / 100 * pw, gap = 10;
