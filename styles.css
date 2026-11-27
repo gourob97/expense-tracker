@@ -199,7 +199,36 @@ main { overflow-x: clip }
 }
 
 /* ===== Loading / sign in ===== */
-.loading { display: flex; align-items: center; justify-content: center; gap: 12px; min-height: 50dvh; color: var(--muted) }
+.loading { display: flex; align-items: center; justify-content: center; gap: 12px; min-height: 50dvh; color: var(--muted); animation: boot-in .2s .3s both }
+/* Shown only if loading takes a moment, so a fast start doesn't flash it */
+@keyframes boot-in { from { opacity: 0 } }
+
+/* Booting (signed in last time, data not here yet): skeletons in place of the summary and the lists */
+.boot-skel, .boot-status { display: none }
+body[data-booting] .app > :not(.boot-skel):not(.boot-status) { display: none !important }
+body[data-booting] .boot-skel { display: flex; flex-direction: column; gap: 14px }
+body[data-booting] .boot-status { display: block }
+body[data-booting] .fab, body[data-booting] .add-btn { pointer-events: none } /* nothing to add to until the data is in */
+body[data-booting] .account-sub { visibility: hidden } /* "All changes synced" isn't true yet */
+body:not([data-booting]) .app > :not(.boot-skel) { animation: boot-in .25s both }
+.sk-card { padding: 20px; display: flex; flex-direction: column; gap: 12px }
+.sk-list { padding: 8px 20px; gap: 0 }
+.sk {
+  display: block; height: 12px; border-radius: 6px;
+  background: linear-gradient(90deg, var(--surface-2) 0%, var(--line-2) 40%, var(--surface-2) 80%); background-size: 300% 100%;
+  animation: sk-shimmer 1.4s ease-in-out infinite
+}
+@keyframes sk-shimmer { from { background-position: 100% 0 } to { background-position: 0 0 } }
+.sk-big { width: 180px; height: 40px; border-radius: 10px; margin-bottom: 6px }
+.sk-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 14px; margin-top: 6px }
+.sk-grid .sk { width: 70% } .sk-grid .sk-val { width: 55%; height: 18px }
+.sk-head { display: flex; justify-content: space-between; align-items: center; padding: 8px 4px 0 }
+.sk-row { display: flex; align-items: center; gap: 12px; padding: 12px 0 }
+.sk-icon { width: 40px; height: 40px; border-radius: 12px; flex: 0 0 auto }
+.sk-lines { flex: 1; display: flex; flex-direction: column; gap: 8px }
+.sk-lines .sk { height: 13px } .sk-lines .sk-sub { height: 11px }
+.sk-amt { width: 56px; height: 14px; flex: 0 0 auto }
+@media (prefers-reduced-motion: reduce) { .sk { animation: none } .loading, body:not([data-booting]) .app > * { animation: none } }
 .spinner { width: 22px; height: 22px; border-radius: 50%; border: 2.5px solid var(--line-2); border-top-color: var(--accent); animation: spin .8s linear infinite }
 @keyframes spin { to { transform: rotate(360deg) } }
 .centered-card { max-width: 420px; margin: 8dvh auto 0; padding: 32px 24px; display: flex; flex-direction: column; gap: 14px }

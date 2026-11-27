@@ -1155,6 +1155,7 @@ function init() {
   $("editBudgets").onclick = () => { editingBudgets = !editingBudgets; budgetEditKey = ""; renderBudgets(); };
   showTab(tabFromHash());
   syncHash(false);
+  $("monthLabel").textContent = periodShort(selectedMonth); // the top bar shows straight away while booting
 
   onAuthStateChanged(auth, u => {
     user = u;
@@ -1164,10 +1165,13 @@ function init() {
     ["entryDialog", "cycleDialog", "accountDialog", "nameDialog"].forEach(id => closeDialog($(id), { instant: true }));
     if (u) {
       document.body.dataset.auth = "in";
+      startBooting();
       subscribeAll();
       watchQueuedWrites();
     } else {
       document.body.dataset.auth = "out";
+      try { localStorage.removeItem("signedIn"); } catch (e) {}
+      endBooting();
       queuedFromBefore = false;
       expenses = []; income = []; planned = []; budgets = {}; recurring = []; recurringIncome = [];
       people = []; loans = []; loanPayments = [];
@@ -1239,8 +1243,23 @@ const LOAN_COLS = ["people", "loans", "loanPayments"];
 let loansPending = new Set(LOAN_COLS);
 let lastRenderSettled = false;
 
+// ----- Booting: skeletons show from sign-in until the month and the loans have first loaded (index.html starts it
+// before any script runs when the person was signed in last time). A fallback ends it if a load never answers.
+let bootTimer = 0;
+function startBooting() {
+  try { localStorage.setItem("signedIn", "1"); } catch (e) {}
+  document.body.dataset.booting = "";
+  clearTimeout(bootTimer);
+  bootTimer = setTimeout(endBooting, 10000);
+}
+function endBooting() {
+  clearTimeout(bootTimer);
+  delete document.body.dataset.booting;
+}
+
 function renderAll() {
   const settled = monthPending.size === 0 && loansPending.size === 0;
+  if (settled && "booting" in document.body.dataset) endBooting();
   const animate = settled && lastRenderSettled && !reducedMotion.matches && !document.hidden;
   lastRenderSettled = settled;
   renderSummary(animate);
