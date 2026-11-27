@@ -1,124 +1,83 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { balances, totals, flowBetween, history, balanceWith, findPerson, cleanName, isValidTxn } from "../loans.js";
+import { loanStates, totals, flowBetween, maxPayment, findPerson, cleanName, isValidLoan, isValidPayment, isValidDue } from "../loans.js";
 
-const people = [{ id: "a", name: "Rahim" }, { id: "b", name: "Karim" }, { id: "c", name: "Nadia" }];
+const people = [{ id: "a", name: "Rahim" }, { id: "b", name: "Karim" }];
 let seq = 0;
-const tx = (personId, dir, amount, date, extra = {}) => ({ id: "t" + ++seq, personId, dir, amount, date, createdAt: seq, ...extra });
-const bal = (list, id) => balances(people, list).find(e => e.person.id === id);
+const loan = (personId, dir, amount, date, extra = {}) => ({ id: "l" + ++seq, personId, dir, amount, date, createdAt: seq, ...extra });
+const pay = (loanId, amount, date, extra = {}) => ({ id: "p" + ++seq, loanId, amount, date, createdAt: seq, ...extra });
+const stateOf = (loans, pays, id) => loanStates(people, loans, pays).find(s => s.loan.id === id);
 
-test("gave raises what they owe you, got lowers it", () => {
-  const list = [tx("a", "gave", 5000, "2026-11-01"), tx("a", "got", 2000, "2026-11-10")];
-  assert.deepEqual({ ...bal(list, "a"), person: undefined }, { person: undefined, balance: 3000, count: 2, last: "2026-11-10", nextDue: "" });
+test("a loan with no payments is fully open", () => {
+  const l = loan("a", "gave", 1000, "2026-11-01");
+  const s = stateOf([l], [], l.id);
+  assert.equal(s.paid, 0); assert.equal(s.left, 1000); assert.equal(s.settled, false);
 });
 
-test("borrowing makes the balance negative; overpaying flips the sign", () => {
-  const list = [tx("b", "got", 10000, "2026-11-01"), tx("b", "gave", 4000, "2026-11-05")];
-  assert.equal(bal(list, "b").balance, -6000);
-  list.push(tx("b", "gave", 7000, "2026-11-20"));
-  assert.equal(bal(list, "b").balance, 1000);
+test("partial payments reduce what's left, each with what was left after it", () => {
+  const l = loan("a", "gave", 1000, "2026-11-01");
+  const pays = [pay(l.id, 300, "2026-11-10"), pay(l.id, 200, "2026-11-05")];
+  const s = stateOf([l], pays, l.id);
+  assert.equal(s.paid, 500); assert.equal(s.left, 500);
+  assert.deepEqual(s.payments.map(p => [p.date, p.leftAfter]), [["2026-11-05", 800], ["2026-11-10", 500]]);
 });
 
-test("a person with no entries is settled", () => {
-  assert.equal(bal([], "c").balance, 0);
-  assert.equal(bal([], "c").count, 0);
+test("a loan is settled once paid in full, on the day of the last payment needed", () => {
+  const l = loan("b", "got", 500, "2026-11-01");
+  const s = stateOf([l], [pay(l.id, 200, "2026-11-03"), pay(l.id, 300, "2026-11-08")], l.id);
+  assert.equal(s.settled, true); assert.equal(s.left, 0); assert.equal(s.settledOn, "2026-11-08");
+});
+
+test("overpaying settles without going negative", () => {
+  const l = loan("a", "gave", 100, "2026-11-01");
+  const s = stateOf([l], [pay(l.id, 150, "2026-11-02")], l.id);
+  assert.equal(s.left, 0); assert.equal(s.paid, 100); assert.equal(s.settled, true);
+});
+
+test("two loans with the same person stay separate", () => {
+  const l1 = loan("a", "gave", 1000, "2026-11-01"), l2 = loan("a", "gave", 300, "2026-11-05");
+  const pays = [pay(l2.id, 300, "2026-11-06")];
+  assert.equal(stateOf([l1, l2], pays, l1.id).left, 1000);
+  assert.equal(stateOf([l1, l2], pays, l2.id).settled, true);
+});
+
+test("unknown people, malformed loans and stray payments are ignored", () => {
+  const ok = loan("a", "gave", 100, "2026-11-01");
+  const states = loanStates(people, [ok, loan("zzz", "gave", 100, "2026-11-01"), loan("a", "sideways", 100, "2026-11-01"), loan("a", "got", -5, "2026-11-01")],
+    [pay("nope", 50, "2026-11-02"), pay(ok.id, 0, "2026-11-02")]);
+  assert.equal(states.length, 1); assert.equal(states[0].left, 100);
+});
+
+test("totals add up what's left both ways and count open loans", () => {
+  const l1 = loan("a", "gave", 1000, "2026-11-01"), l2 = loan("b", "got", 400, "2026-11-01"), l3 = loan("b", "gave", 50, "2026-11-01");
+  const st = loanStates(people, [l1, l2, l3], [pay(l1.id, 250, "2026-11-02"), pay(l3.id, 50, "2026-11-03")]);
+  assert.deepEqual(totals(st), { owedToYou: 750, youOwe: 400, toYouN: 1, youOweN: 1 });
+});
+
+test("cash flow: lending goes out and comes back in; borrowing comes in and goes back out", () => {
+  const l1 = loan("a", "gave", 1000, "2026-10-30"), l2 = loan("b", "got", 400, "2026-11-02");
+  const st = loanStates(people, [l1, l2], [pay(l1.id, 300, "2026-11-05"), pay(l2.id, 100, "2026-11-06"), pay(l2.id, 100, "2026-12-01")]);
+  assert.deepEqual(flowBetween(st, "2026-11-01", "2026-11-30"), { in: 400 + 300, out: 100 });
+});
+
+test("max payment is what's left, plus the edited payment's own amount", () => {
+  const l = loan("a", "gave", 1000, "2026-11-01"), p1 = pay(l.id, 600, "2026-11-02");
+  const s = stateOf([l], [p1], l.id);
+  assert.equal(maxPayment(s), 400);
+  assert.equal(maxPayment(s, p1), 1000);
 });
 
 test("decimals don't leave dust", () => {
-  const list = [];
-  for (let i = 0; i < 10; i++) list.push(tx("a", "gave", 0.1, "2026-11-01"));
-  list.push(tx("a", "got", 1, "2026-11-02"));
-  assert.equal(bal(list, "a").balance, 0);
-  assert.deepEqual(totals(balances(people, list)), { owedToYou: 0, youOwe: 0, toYouN: 0, youOweN: 0 });
+  const l = loan("a", "gave", 1, "2026-11-01");
+  const pays = Array.from({ length: 10 }, () => pay(l.id, 0.1, "2026-11-02"));
+  assert.equal(stateOf([l], pays, l.id).settled, true);
 });
 
-test("unknown people and malformed entries are ignored", () => {
-  const list = [
-    tx("ghost", "gave", 100, "2026-11-01"),
-    tx("a", "lent", 100, "2026-11-01"),
-    tx("a", "gave", -5, "2026-11-01"),
-    tx("a", "gave", "abc", "2026-11-01"),
-    tx("a", "gave", 0, "2026-11-01"),
-    { id: "x", dir: "gave", amount: 10, date: "2026-11-01" },
-    tx("a", "gave", "250", "2026-11-01")
-  ];
-  assert.equal(bal(list, "a").balance, 250);
-  assert.equal(bal(list, "a").count, 1);
-  assert.ok(!isValidTxn(null));
-});
-
-test("totals split what you're owed from what you owe", () => {
-  const list = [tx("a", "gave", 3000, "2026-11-01"), tx("b", "got", 1200, "2026-11-01"), tx("c", "gave", 500, "2026-11-01"), tx("c", "got", 500, "2026-11-02")];
-  assert.deepEqual(totals(balances(people, list)), { owedToYou: 3000, youOwe: 1200, toYouN: 1, youOweN: 1 });
-});
-
-test("flowBetween counts cash in and out inside the range, inclusive", () => {
-  const list = [
-    tx("a", "gave", 100, "2026-10-31"),
-    tx("a", "gave", 200, "2026-11-01"),
-    tx("b", "got", 300, "2026-11-15"),
-    tx("a", "got", 50, "2026-11-30"),
-    tx("a", "got", 999, "2026-12-01"),
-    tx("ghost", "got", 1, "2026-11-10")
-  ];
-  const known = id => people.some(p => p.id === id);
-  assert.deepEqual(flowBetween(list, "2026-11-01", "2026-11-30", known), { in: 350, out: 200 });
-  assert.deepEqual(flowBetween(list, "2026-11-01", "2026-11-30"), { in: 351, out: 200 });
-});
-
-test("history is oldest first with the running balance", () => {
-  const list = [
-    tx("a", "got", 1000, "2026-11-10"),
-    tx("a", "gave", 5000, "2026-11-01"),
-    tx("b", "gave", 1, "2026-11-02"),
-    tx("a", "gave", 500, "2026-11-10")
-  ];
-  assert.deepEqual(history(list, "a").map(t => [t.date, t.dir, t.after]),
-    [["2026-11-01", "gave", 5000], ["2026-11-10", "got", 4000], ["2026-11-10", "gave", 4500]]);
-});
-
-test("balanceWith previews a new entry or an edit", () => {
-  assert.equal(balanceWith(3000, { dir: "got", amount: 3000 }), 0);
-  assert.equal(balanceWith(0, { dir: "got", amount: 500 }), -500);
-  const old = tx("a", "gave", 1000, "2026-11-01");
-  assert.equal(balanceWith(1000, { dir: "got", amount: 200 }, old), -200);
-  assert.equal(balanceWith(1000, { dir: "gave", amount: NaN }, old), 0);
-});
-
-test("findPerson ignores case and spacing", () => {
-  assert.equal(findPerson(people, "  rahim ")?.id, "a");
-  assert.equal(findPerson([{ id: "z", name: "Abdul  Karim" }], "abdul karim")?.id, "z");
-  assert.equal(findPerson(people, "   "), null);
-  assert.equal(findPerson(people, "Someone"), null);
-  assert.equal(cleanName("  Abdul   Karim "), "Abdul Karim");
-});
-
-test("repayments pay off the oldest entries first", () => {
-  const list = [tx("a", "gave", 500, "2026-11-01"), tx("a", "gave", 300, "2026-11-05"), tx("a", "got", 600, "2026-11-10")];
-  assert.deepEqual(history(list, "a").map(x => x.open), [0, 200, 0]);
-});
-
-test("overpaying opens an entry the other way", () => {
-  const list = [tx("b", "got", 1000, "2026-11-01"), tx("b", "gave", 1500, "2026-11-03")];
-  assert.deepEqual(history(list, "b").map(x => x.open), [0, 500]);
-});
-
-test("next due date skips paid-off entries", () => {
-  const list = [
-    tx("a", "gave", 500, "2026-11-01", { due: "2026-11-15" }),
-    tx("a", "gave", 300, "2026-11-05", { due: "2026-12-01" }),
-    tx("a", "got", 500, "2026-11-10")
-  ];
-  assert.equal(bal(list, "a").nextDue, "2026-12-01");
-  list.push(tx("a", "got", 300, "2026-11-20"));
-  assert.equal(bal(list, "a").nextDue, "");
-});
-
-test("next due date is the earliest open one, and ignores malformed dates", () => {
-  const list = [
-    tx("c", "got", 200, "2026-11-01", { due: "2026-12-20" }),
-    tx("c", "got", 200, "2026-11-02", { due: "2026-12-05" }),
-    tx("c", "got", 200, "2026-11-03", { due: "soon" })
-  ];
-  assert.equal(bal(list, "c").nextDue, "2026-12-05");
+test("validation and names", () => {
+  assert.equal(isValidDue("2026-12-01"), true); assert.equal(isValidDue("soon"), false);
+  assert.equal(isValidLoan({ personId: "a", dir: "got", amount: 5 }), true);
+  assert.equal(isValidPayment({ loanId: "x", amount: "abc" }), false);
+  assert.equal(cleanName("  Rahim   Uddin "), "Rahim Uddin");
+  assert.equal(findPerson(people, " rahim ")?.id, "a");
+  assert.equal(findPerson(people, ""), null);
 });

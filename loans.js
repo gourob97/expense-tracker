@@ -1,23 +1,20 @@
-// Personal loans: one running balance per person, built from two kinds of transaction.
+// Loans: each one is its own item, lent ("gave") or borrowed ("got"), with someone, paid back in parts.
 //
-//   "gave": money left you (you lent it, or paid back what you owed)  → they owe you more
-//   "got":  money came to you (you borrowed it, or were paid back)    → they owe you less
+//   loan:    { personId, dir: "gave" | "got", amount, date, due?, note }
+//   payment: { loanId, amount, date, note }   money coming back on a loan you gave, or going out on one you got
 //
-// Balance > 0: they owe you. Balance < 0: you owe them. 0: settled.
-// Loans are neither income nor spending; only their cash movement counts towards "Left to spend".
+// A loan is settled once its payments add up to its amount. Loans are neither income nor spending;
+// only the cash they move counts towards "Left to spend".
 // Sums are done in paisa (integer cents) so repeated decimals can't leave a ৳0.0000001 balance.
 
 export const DIRS = ["gave", "got"];
 const cents = n => Math.round(Number(n) * 100);
+const positive = n => Number.isFinite(Number(n)) && Number(n) > 0;
 
-// Optional due date on an entry: when the money it moved should come back ("YYYY-MM-DD")
+// Optional due date on a loan: when it should be paid back ("YYYY-MM-DD")
 export const isValidDue = d => typeof d === "string" && /^\d{4}-\d{2}-\d{2}$/.test(d);
-
-export const isValidTxn = t =>
-  !!t && DIRS.includes(t.dir) && typeof t.personId === "string" && Number.isFinite(Number(t.amount)) && Number(t.amount) > 0;
-
-// Change to the person's balance, in cents
-const effect = t => (t.dir === "gave" ? 1 : -1) * cents(t.amount);
+export const isValidLoan = l => !!l && DIRS.includes(l.dir) && typeof l.personId === "string" && positive(l.amount);
+export const isValidPayment = p => !!p && typeof p.loanId === "string" && positive(p.amount);
 
 export const cleanName = s => String(s ?? "").trim().replace(/\s+/g, " ");
 const normName = s => cleanName(s).toLocaleLowerCase();
@@ -27,86 +24,63 @@ export const findPerson = (people, name) => {
   return n ? people.find(p => normName(p.name) === n) || null : null;
 };
 
-// Oldest first; same-day entries by creation time
+// Oldest first; same-day items by creation time
 export const byDateAsc = (a, b) => (a.date || "").localeCompare(b.date || "") || (a.createdAt || 0) - (b.createdAt || 0);
 
-// How much of each entry is still outstanding, in cents, by entry id. Repayments pay off the oldest open
-// entries first: a "got" eats into earlier "gave" entries and vice versa, and whatever is left over opens a new
-// one. So after Rahim borrows 500 on the 1st and 300 on the 5th and repays 600, only 200 of the 5th is open.
-// `sorted`: one person's valid entries, oldest first.
-function outstanding(sorted) {
-  const open = []; // oldest first, all in the same direction
-  const left = new Map();
-  for (const t of sorted) {
-    let c = cents(t.amount);
-    while (c > 0 && open.length && open[0].dir !== t.dir) {
-      const lot = open[0], take = Math.min(c, left.get(lot.id));
-      left.set(lot.id, left.get(lot.id) - take);
-      c -= take;
-      if (left.get(lot.id) === 0) open.shift();
-    }
-    left.set(t.id, c);
-    if (c > 0) open.push(t);
+// One state per loan: { loan, person, paid, left, settled, settledOn, payments }.
+// payments: oldest first, each with what was left right after it (`leftAfter`).
+// Loans with someone unknown (e.g. deleted on another device while this one was offline), malformed loans and
+// payments for unknown loans are ignored. Paying more than the loan's amount just settles it.
+export function loanStates(people, loans, payments) {
+  const byPerson = new Map(people.map(p => [p.id, p]));
+  const byLoan = new Map();
+  for (const p of payments) if (isValidPayment(p)) (byLoan.get(p.loanId) || byLoan.set(p.loanId, []).get(p.loanId)).push(p);
+  const out = [];
+  for (const loan of loans) {
+    const person = byPerson.get(loan.personId);
+    if (!person || !isValidLoan(loan)) continue;
+    const total = cents(loan.amount);
+    let paid = 0, settledOn = "";
+    const list = (byLoan.get(loan.id) || []).sort(byDateAsc).map(p => {
+      paid += cents(p.amount);
+      if (!settledOn && paid >= total) settledOn = p.date || "";
+      return { ...p, leftAfter: Math.max(0, total - paid) / 100 };
+    });
+    const left = Math.max(0, total - paid);
+    out.push({ loan, person, paid: Math.min(paid, total) / 100, left: left / 100, settled: left === 0, settledOn, payments: list });
   }
-  return left;
-}
-const sortedFor = (txns, personId) => txns.filter(t => t.personId === personId && isValidTxn(t)).sort(byDateAsc);
-
-// Earliest due date among a person's entries that aren't fully paid off ("" if none)
-function nextDueOf(sorted) {
-  const left = outstanding(sorted);
-  let next = "";
-  for (const t of sorted) if (left.get(t.id) > 0 && isValidDue(t.due) && (!next || t.due < next)) next = t.due;
-  return next;
+  return out;
 }
 
-// One entry per person: { person, balance, count, last, nextDue }. Transactions for unknown people
-// (e.g. deleted on another device while this one was offline) and malformed ones are ignored.
-export function balances(people, txns) {
-  const acc = new Map(people.map(p => [p.id, { person: p, c: 0, count: 0, last: "" }]));
-  for (const t of txns) {
-    const e = acc.get(t.personId);
-    if (!e || !isValidTxn(t)) continue;
-    e.c += effect(t);
-    e.count++;
-    if ((t.date || "") > e.last) e.last = t.date;
-  }
-  return [...acc.values()].map(({ person, c, count, last }) => ({
-    person, balance: c / 100, count, last, nextDue: c ? nextDueOf(sortedFor(txns, person.id)) : ""
-  }));
-}
-
-export function totals(entries) {
+// What's still owed both ways, and how many open loans make it up
+export function totals(states) {
   let toYou = 0, youOwe = 0, toYouN = 0, youOweN = 0;
-  for (const { balance } of entries) {
-    const c = cents(balance);
-    if (c > 0) { toYou += c; toYouN++; } else if (c < 0) { youOwe -= c; youOweN++; }
+  for (const s of states) {
+    const c = cents(s.left);
+    if (!c) continue;
+    if (s.loan.dir === "gave") { toYou += c; toYouN++; } else { youOwe += c; youOweN++; }
   }
   return { owedToYou: toYou / 100, youOwe: youOwe / 100, toYouN, youOweN };
 }
 
-// Cash that moved through loans between two ISO dates (inclusive): { in, out }
-export function flowBetween(txns, start, end, isKnown = () => true) {
+// Cash that loans moved between two ISO dates (inclusive): { in, out }.
+// Lending is money out and its payments come in; borrowing is money in and its payments go out.
+export function flowBetween(states, start, end) {
   let inC = 0, outC = 0;
-  for (const t of txns) {
-    if (!isValidTxn(t) || !isKnown(t.personId) || !(t.date >= start && t.date <= end)) continue;
-    if (t.dir === "gave") outC += cents(t.amount); else inC += cents(t.amount);
+  const add = (date, amount, isIn) => {
+    if (!(date >= start && date <= end)) return;
+    if (isIn) inC += cents(amount); else outC += cents(amount);
+  };
+  for (const { loan, payments } of states) {
+    add(loan.date, loan.amount, loan.dir === "got");
+    for (const p of payments) add(p.date, p.amount, loan.dir === "gave");
   }
   return { in: inC / 100, out: outC / 100 };
 }
 
-// One person's transactions, oldest first, each with the balance right after it (`after`)
-// and how much of it is still outstanding (`open`, see outstanding())
-export function history(txns, personId) {
-  let c = 0;
-  const sorted = sortedFor(txns, personId), left = outstanding(sorted);
-  return sorted.map(t => { c += effect(t); return { ...t, after: c / 100, open: left.get(t.id) / 100 }; });
-}
-
-// Balance after applying a change: `without` is a transaction being edited (its old effect is taken out first)
-export function balanceWith(balance, { dir, amount }, without = null) {
-  let c = cents(balance);
-  if (without && isValidTxn(without)) c -= effect(without);
-  if (DIRS.includes(dir) && Number(amount) > 0) c += effect({ dir, amount });
-  return c / 100;
+// The most a payment can be: the loan's amount minus every other payment on it
+// (`editing`: a payment being edited, whose own amount is free again)
+export function maxPayment(state, editing = null) {
+  const others = state.payments.reduce((c, p) => c + (editing && p.id === editing.id ? 0 : cents(p.amount)), 0);
+  return Math.max(0, cents(state.loan.amount) - others) / 100;
 }

@@ -8,7 +8,7 @@ import {
 import { STRINGS, CAT_BN } from "./i18n.js";
 import { periodRange, periodOf, shiftPeriod, dateInPeriod, addDays, daysBetween, inPeriod, isPeriodKey, normalizeStartDay, DEFAULT_START_DAY } from "./period.js";
 import { formatAmountInput } from "./amount.js";
-import { balances, totals, flowBetween, history as personHistory, balanceWith, findPerson, cleanName, isValidDue } from "./loans.js";
+import { loanStates, totals, flowBetween, maxPayment, findPerson, cleanName, isValidDue } from "./loans.js";
 
 // ===== FIREBASE WEB CONFIG =====
 const firebaseConfig = {
@@ -311,21 +311,21 @@ const cachedStartDay = () => { try { return normalizeStartDay(localStorage.getIt
 let startDay = cachedStartDay();
 // Key of the period being viewed: "YYYY-MM" of the month it starts in (see period.js).
 // Lives in the URL hash (#/tab?m=YYYY-MM) so reload and back/forward keep it; omitted for the current period.
-// The Loans tab adds the person being viewed (&p=<id>), so back returns from their history to the list.
+// The Loans tab adds the loan being viewed (&l=<id>), so back returns from it to the list.
 const nowPeriod = () => periodOf(todayISO(), startDay);
 function readHash() {
   const [tab, qs = ""] = location.hash.replace(/^#\/?/, "").split("?");
-  const params = new URLSearchParams(qs), m = params.get("m"), p = params.get("p");
-  return { tab, month: m && isPeriodKey(m) ? m : null, person: tab === "loans" && p && /^[\w-]{1,64}$/.test(p) ? p : null };
+  const params = new URLSearchParams(qs), m = params.get("m"), l = params.get("l");
+  return { tab, month: m && isPeriodKey(m) ? m : null, loan: tab === "loans" && l && /^[\w-]{1,64}$/.test(l) ? l : null };
 }
 let selectedMonth = readHash().month || nowPeriod();
-let selectedPerson = readHash().person;
+let selectedLoan = readHash().loan;
 const currentRange = () => periodRange(selectedMonth, startDay);
 let user = null;
 let categories = [...DEFAULT_CATEGORIES];
 let expenses = [], income = [], planned = [], budgets = {}, recurring = [], recurringIncome = [];
-// Loans are all-time (balances span months), so they load once per sign-in rather than per period
-let people = [], loanTxns = [];
+// Loans are all-time (they span months), so they load once per sign-in rather than per period
+let people = [], loans = [], loanPayments = [];
 let unsubs = [], monthUnsubs = [];
 let auth, db;
 let currentTab = "expenses", filterCat = null, searchQ = "", editingBudgets = false, budgetEditKey = "";
@@ -334,22 +334,22 @@ const userCol = name => collection(db, "users", user.uid, name);
 
 // ----- Tabs (state lives in the URL hash as #/name so reload and back/forward work) -----
 const tabFromHash = () => readHash().tab;
-function hashFor(tab, month, person = null) {
+function hashFor(tab, month, loan = null) {
   const q = new URLSearchParams();
   if (month !== nowPeriod()) q.set("m", month);
-  if (tab === "loans" && person) q.set("p", person);
+  if (tab === "loans" && loan) q.set("l", loan);
   const qs = q.toString();
   return `#/${tab}` + (qs ? "?" + qs : "");
 }
 // Writes tab + month to the URL. push=true adds a history entry (back returns to the previous month).
 function syncHash(push) {
-  document.querySelectorAll('a[href^="#/"]:not([data-person])').forEach(a => { a.href = hashFor(a.getAttribute("href").replace(/^#\/?/, "").split("?")[0], selectedMonth); });
-  const target = hashFor(currentTab, selectedMonth, selectedPerson);
+  document.querySelectorAll('a[href^="#/"]:not([data-loan])').forEach(a => { a.href = hashFor(a.getAttribute("href").replace(/^#\/?/, "").split("?")[0], selectedMonth); });
+  const target = hashFor(currentTab, selectedMonth, selectedLoan);
   if (location.hash === target) return;
   if (push) location.hash = target; else history.replaceState(history.state, "", target);
 }
 const KIND_FOR_TAB = { expenses: "expense", income: "income", planned: "planned", budgets: "expense", loans: "loan" };
-const ADD_LABEL = { expense: "addExpense", income: "addIncome", planned: "addPlanned", loan: "addLoan" };
+const ADD_LABEL = { expense: "addExpense", income: "addIncome", planned: "addPlanned", loan: "addLoan", payment: "addPayment" };
 const TAB_TITLE = { expenses: "tabExpenses", income: "tabIncome", planned: "tabPlanned", budgets: "tabBudgets", loans: "tabLoans" };
 function showTab(name) {
   if (!TABS.includes(name)) name = TABS[0];
@@ -364,19 +364,14 @@ function showTab(name) {
   return name;
 }
 window.addEventListener("hashchange", () => {
-  const { tab, month, person } = readHash(), prevTab = currentTab, prevPerson = selectedPerson;
+  const { tab, month, loan } = readHash(), prevTab = currentTab, prevLoan = selectedLoan;
   showTab(tab);
-  selectedPerson = currentTab === "loans" ? person : null;
+  selectedLoan = currentTab === "loans" ? loan : null;
   setMonth(month || nowPeriod(), { fromHash: true });
   syncHash(false); // normalise unknown tabs / stale params
-  if (selectedPerson !== prevPerson) renderLists();
-  if ((currentTab !== prevTab || selectedPerson !== prevPerson) && window.scrollY > 0) window.scrollTo({ top: 0 });
+  if (selectedLoan !== prevLoan) renderLists();
+  if ((currentTab !== prevTab || selectedLoan !== prevLoan) && window.scrollY > 0) window.scrollTo({ top: 0 });
 });
-// Opens one person's history (null: back to the list). Pushes a history entry so back returns.
-function openPerson(id) {
-  if (selectedPerson === id && currentTab === "loans") return;
-  location.hash = hashFor("loans", selectedMonth, id);
-}
 
 // ----- Month switching -----
 function setMonth(ym, { fromHash = false } = {}) {
@@ -560,7 +555,7 @@ async function signOutAndClear() {
 
 // ----- Export: CSV of every entry (for spreadsheets) or a JSON backup of everything -----
 const ENTRY_COLS = [["expenses", "expense"], ["income", "income"], ["planned", "planned"]];
-const ALL_COLS = ["expenses", "income", "planned", "recurring", "recurringIncome", "people", "loanTxns"];
+const ALL_COLS = ["expenses", "income", "planned", "recurring", "recurringIncome", "people", "loans", "loanPayments"];
 const SETTINGS_DOCS = ["categories", "budgets", "preferences"];
 // Quotes when needed; a leading = + - @ is neutralised so spreadsheets don't run a note as a formula
 function csvCell(v) {
@@ -599,9 +594,11 @@ async function exportData(format) {
     } else {
       const rows = ENTRY_COLS.flatMap(([n, type]) => data[n].map(e =>
         [type, e.date || "", e.category || "", Number(e.amount) || 0, e.note || "", e.recurringId ? "yes" : "", "", ""]));
-      // Loan money: "loan gave" (lent, or repaid what you owed) and "loan got" (borrowed, or were repaid)
-      const names = new Map(data.people.map(p => [p.id, p.name]));
-      data.loanTxns.forEach(x => rows.push([`loan ${x.dir}`, x.date || "", "", Number(x.amount) || 0, x.note || "", "", names.get(x.personId) || "", x.due || ""]));
+      // Loans ("loan lent" / "loan borrowed") and their payments, with who they're with
+      const names = new Map(data.people.map(p => [p.id, p.name])), loanById = new Map(data.loans.map(l => [l.id, l]));
+      data.loans.forEach(l => rows.push([l.dir === "got" ? "loan borrowed" : "loan lent", l.date || "", "", Number(l.amount) || 0, l.note || "", "", names.get(l.personId) || "", l.due || ""]));
+      data.loanPayments.forEach(x => { const l = loanById.get(x.loanId);
+        rows.push([l?.dir === "got" ? "loan you repaid" : "loan repaid to you", x.date || "", "", Number(x.amount) || 0, x.note || "", "", names.get(l?.personId) || "", ""]); });
       rows.sort((x, y) => (x[1] < y[1] ? -1 : x[1] > y[1] ? 1 : 0));
       const lines = [["Type", "Date", "Category", "Amount", "Note", "Recurring", "Person", "Due"], ...rows].map(r => r.map(csvCell).join(","));
       // BOM so Excel reads UTF-8 (Bangla notes) correctly
@@ -694,11 +691,13 @@ function initInAppNotice() {
   }
 }
 
-// ===== Entry sheet: expense / income / planned / loan, add or edit =====
+// ===== Entry sheet: expense / income / planned / loan / loan payment, add or edit =====
 let entryKind = "expense";
 // Set while the sheet edits an existing item: { col, item }. Null when adding.
 let editing = null;
-const COL_KIND = { expenses: "expense", income: "income", planned: "planned", recurring: "expense", recurringIncome: "income", loanTxns: "loan" };
+// The loan a payment is for (its state from loanState()), while the sheet adds or edits a payment
+let payFor = null;
+const COL_KIND = { expenses: "expense", income: "income", planned: "planned", recurring: "expense", recurringIncome: "income", loans: "loan", loanPayments: "payment" };
 const isRuleCol = col => col === "recurring" || col === "recurringIncome";
 const usesCategory = kind => kind === "expense" || kind === "planned";
 const loanDir = () => document.querySelector('input[name="loanDir"]:checked')?.value || "gave";
@@ -707,13 +706,13 @@ function setKind(kind) {
   entryKind = kind;
   const radio = document.querySelector(`input[name="kind"][value="${kind}"]`);
   if (radio) radio.checked = true;
-  const loan = kind === "loan";
+  const loan = kind === "loan", payment = kind === "payment";
   $("eCatField").hidden = !usesCategory(kind);
   $("ePersonField").hidden = !loan;
   $("eDirField").hidden = !loan;
   $("eDueRow").hidden = !loan;
-  $("eRepeatRow").hidden = kind === "planned" || loan || !!editing;
-  $("eNote").placeholder = t(kind === "income" ? "phSource" : kind === "planned" ? "phWhat" : loan ? "phLoanNote" : "phNote");
+  $("eRepeatRow").hidden = kind === "planned" || loan || payment || !!editing;
+  $("eNote").placeholder = t(kind === "income" ? "phSource" : kind === "planned" ? "phWhat" : loan ? "phLoanNote" : payment ? "phPayNote" : "phNote");
   $("entrySubmit").textContent = t(editing ? "saveChanges" : ADD_LABEL[kind]);
   clearFieldErrors();
   updateSheet();
@@ -721,15 +720,18 @@ function setKind(kind) {
 document.querySelectorAll('input[name="kind"]').forEach(r => { r.onchange = () => setKind(r.value); });
 document.querySelectorAll('input[name="loanDir"]').forEach(r => { r.onchange = updateSheet; });
 
-// The amount box says what the money did and takes its colour: out (spent, gave), in (received, got), planned
+// The amount box says what the money did and takes its colour: out (spent, lent, paid back), in (received,
+// borrowed, paid back to you), planned
 const AMOUNT_MODE = {
   expense: ["amtSpent", "−", "out"], planned: ["amtPlan", "", "plan"], income: ["amtReceived", "+", "in"],
-  gave: ["amtGave", "−", "out"], got: ["amtGot", "+", "in"]
+  gave: ["amtGave", "−", "out"], got: ["amtGot", "+", "in"],
+  repaidToYou: ["amtRepaidToYou", "+", "in"], youRepaid: ["amtYouRepaid", "−", "out"]
 };
+const amountMode = () => entryKind === "loan" ? loanDir() : entryKind === "payment" ? (payFor?.loan.dir === "got" ? "youRepaid" : "repaidToYou") : entryKind;
 // Everything in the sheet that depends on the type, direction, amount, person or note
 function updateSheet() {
-  const loan = entryKind === "loan", dir = loanDir();
-  const [label, sign, tone] = AMOUNT_MODE[loan ? dir : entryKind];
+  const dir = loanDir();
+  const [label, sign, tone] = AMOUNT_MODE[amountMode()];
   const hasAmount = $("eAmount").value !== "";
   $("eAmountLabel").textContent = t(label);
   $("eAmountSign").textContent = hasAmount ? sign : "";
@@ -742,6 +744,12 @@ function updateSheet() {
 
 // ----- Inline errors, shown under the field they're about -----
 function fieldError(id, msg) { const el = $(id); el.textContent = msg; el.hidden = !msg; }
+function amountError(msg) {
+  fieldError("eAmountErr", msg);
+  $("eAmountBox").classList.add("invalid");
+  $("eAmount").setAttribute("aria-invalid", "true");
+  $("eAmount").focus();
+}
 function clearFieldErrors() {
   ["eAmountErr", "ePersonErr", "eDateErr", "eDueErr"].forEach(id => fieldError(id, ""));
   $("eAmountBox").classList.remove("invalid");
@@ -770,12 +778,13 @@ function buildCatGrid(select) {
 }
 const checkCategory = c => { const r = [...$("eCatGrid").querySelectorAll("input")].find(i => i.value === c); if (r) r.checked = true; };
 
-// ----- Person chips (loan): the 8 most recently active people with their balance, plus "New" -----
+// ----- Person chips (loan): the 8 most recently active people with what's open with them, plus "New" -----
 function buildPeopleChips(selectedId, { allowNew = true } = {}) {
   const st = loanState();
-  const recent = [...st.entries].sort((a, b) => (b.last || "").localeCompare(a.last || "") || a.person.name.localeCompare(b.person.name));
+  const recent = [...st.persons].sort((a, b) => (b.last || "").localeCompare(a.last || "") || a.person.name.localeCompare(b.person.name));
   let shown = recent.slice(0, 8);
-  if (selectedId && st.byId.has(selectedId) && !shown.some(e => e.person.id === selectedId)) shown = [st.byId.get(selectedId), ...shown.slice(0, 7)];
+  const sel = selectedId && st.persons.find(e => e.person.id === selectedId);
+  if (sel && !shown.includes(sel)) shown = [sel, ...shown.slice(0, 7)];
   const chip = e => h("label", { class: "chip-opt person-chip" },
     h("input", { type: "radio", name: "person", value: e.person.id, checked: e.person.id === selectedId || null }),
     h("span", { class: "chip-face" }, personIcon(e.person),
@@ -786,7 +795,7 @@ function buildPeopleChips(selectedId, { allowNew = true } = {}) {
     h("input", { type: "radio", name: "person", value: "", checked: (!selectedId && !shown.length) || null }),
     h("span", { class: "chip-face" }, svg("plus", 16), h("span", { text: t("newPerson") }))) : null;
   $("ePeople").replaceChildren(...shown.map(chip), newChip);
-  $("peopleNames").replaceChildren(...st.entries.map(e => h("option", { value: e.person.name })));
+  $("peopleNames").replaceChildren(...st.persons.map(e => h("option", { value: e.person.name })));
   $("ePersonNew").value = "";
   syncPersonNew();
 }
@@ -808,16 +817,12 @@ $("ePeople").addEventListener("change", () => {
 });
 $("ePersonNew").addEventListener("input", () => { fieldError("ePersonErr", ""); updateLoanPreview(); });
 
-// Live "After this: Rahim owes you ৳3,000" above Save
+// Payments: live "After this: ৳400 left" / "After this: paid in full" above Save
 function updateLoanPreview() {
-  const el = $("ePreview");
-  const amount = parseNum($("eAmount").value), { person, typed } = sheetPerson(), name = person ? person.name : typed;
-  if (entryKind !== "loan" || !name || !(amount > 0)) { el.hidden = true; el.textContent = ""; return; }
-  const txn = editing?.col === "loanTxns" ? editing.item : null;
-  const base = person ? loanState().byId.get(person.id)?.balance || 0 : 0;
-  // An edit replaces the entry's old effect, but only on the person it already belonged to
-  const next = balanceWith(base, { dir: loanDir(), amount }, txn && person && txn.personId === person.id ? txn : null);
-  el.textContent = t("previewAfter", { status: statusText(name, next) });
+  const el = $("ePreview"), amount = parseNum($("eAmount").value);
+  if (entryKind !== "payment" || !payFor || !(amount > 0)) { el.hidden = true; el.textContent = ""; return; }
+  const left = Math.round((maxPayment(payFor, editing?.item) - amount) * 100) / 100;
+  el.textContent = left > 0 ? t("previewLeft", { amt: fmt(left) }) : left === 0 ? t("previewPaid") : t("payTooMuch", { amt: fmt(maxPayment(payFor, editing?.item)) });
   el.hidden = false;
 }
 
@@ -849,7 +854,7 @@ const isOverdue = iso => !!iso && iso < todayISO();
 // ----- Note suggestions: the notes used most for this type, narrowed as you type. Picking one for an
 // expense or plan also picks the category it was last used with ("Uber" → Transport). -----
 function noteSuggestions(kind, typed) {
-  const src = kind === "income" ? income : kind === "loan" ? loanTxns : [...expenses, ...planned];
+  const src = kind === "income" ? income : kind === "loan" ? loans : kind === "payment" ? loanPayments : [...expenses, ...planned];
   const byNote = new Map();
   for (const x of src) {
     const note = (x.note || "").trim();
@@ -882,25 +887,24 @@ $("eNote").addEventListener("input", renderSuggestions);
 const defaultDate = () => { const r = currentRange(), today = todayISO(); return currentTab === "loans" || inPeriod(today, r) ? today : r.start; };
 
 // kind: the entry type; col + item: what is being edited (none when adding);
-// personId / dir: a new loan entry started from a person's page ("I gave" / "I got")
-function openSheet(kind, col = null, item = null, { personId = null, dir = null } = {}) {
+// personId: a new loan's person; loanId: the loan a new payment is for
+function openSheet(kind, col = null, item = null, { personId = null, loanId = null } = {}) {
   if (!user) return;
   editing = item ? { col, item } : null;
-  const rule = !!item && isRuleCol(col), loanEdit = col === "loanTxns";
+  const rule = !!item && isRuleCol(col), loanEdit = col === "loans", payEdit = col === "loanPayments";
+  payFor = kind === "payment" ? loanState().byId.get(payEdit ? item.loanId : loanId) || null : null;
+  if (kind === "payment" && !payFor) { editing = null; return; }
   closeMenu(false);
   buildCatGrid(item?.category);
-  const pid = loanEdit ? item.personId : personId;
-  const balance = (pid && loanState().byId.get(pid)?.balance) || 0;
-  document.querySelector(`input[name="loanDir"][value="${item?.dir || dir || (balance > 0 ? "got" : "gave")}"]`).checked = true;
-  buildPeopleChips(pid, { allowNew: !loanEdit });
-  $("eKindSeg").hidden = !!item; // moving an item between types isn't an edit
+  document.querySelector(`input[name="loanDir"][value="${loanEdit ? item.dir : "gave"}"]`).checked = true;
+  buildPeopleChips(loanEdit ? item.personId : personId);
+  $("eKindSeg").hidden = !!item || kind === "payment"; // moving an item between types isn't an edit
   $("eDateField").hidden = rule;
   $("eDayRow").hidden = !rule;
   $("eNote").value = item?.note || "";
   $("eRepeat").checked = false;
-  // The button that settles up pre-fills the outstanding amount (selected, so typing replaces it)
-  const settles = !item && dir && (dir === "got" ? balance > 0 : balance < 0);
-  const amount = item ? item.amount : settles ? Math.abs(balance) : null;
+  // A new payment starts with what's left on the loan (selected, so typing replaces it)
+  const amount = item ? item.amount : kind === "payment" ? payFor.left : null;
   $("eAmount").value = amount == null ? "" : formatAmountInput(plainFmt.format(amount)).value;
   setDate(item && !rule ? item.date : defaultDate());
   setDue(loanEdit ? item.due : "");
@@ -909,7 +913,7 @@ function openSheet(kind, col = null, item = null, { personId = null, dir = null 
     $("eDay").value = String(item.day);
   }
   setKind(kind); // after the fields are filled: it refreshes everything that depends on them
-  $("entryTitle").textContent = t(!item ? "newEntry" : rule ? "editRecurring" : loanEdit ? "editLoan" : "editEntry");
+  $("entryTitle").textContent = t(!item ? (kind === "payment" ? "addPayment" : "newEntry") : rule ? "editRecurring" : loanEdit ? "editLoan" : payEdit ? "editPayment" : "editEntry");
   openDialog($("entryDialog"));
   // With a mouse or trackpad there's no on-screen keyboard, so typing can start at once. On touch screens focusing
   // the amount would throw the keyboard up over the sheet before anything is picked; it opens when the amount is tapped.
@@ -919,9 +923,10 @@ function openSheet(kind, col = null, item = null, { personId = null, dir = null 
   }
 }
 const finePointer = matchMedia("(pointer: fine)");
-const openEntry = (kind = KIND_FOR_TAB[currentTab]) => openSheet(kind, null, null, kind === "loan" ? { personId: selectedPerson } : {});
+const openEntry = (kind = KIND_FOR_TAB[currentTab]) => openSheet(kind);
 const openEdit = (col, item) => openSheet(COL_KIND[col], col, item);
-const openLoanSheet = ({ personId = null, dir = null, txn = null } = {}) => openSheet("loan", txn ? "loanTxns" : null, txn, { personId, dir });
+const openLoanSheet = ({ personId = null, item = null } = {}) => openSheet("loan", item ? "loans" : null, item, { personId });
+const openPaymentSheet = ({ loanId = null, item = null } = {}) => openSheet("payment", item ? "loanPayments" : null, item, { loanId });
 $("fab").onclick = () => openEntry();
 $("addBtn").onclick = () => openEntry();
 $("entryCancel").onclick = () => closeDialog($("entryDialog"));
@@ -969,6 +974,7 @@ function submitEntry() {
     submitLoan({ amount, date, note, due });
     return;
   }
+  if (entryKind === "payment") { submitPayment({ amount, date, note }); return; }
   const category = $("eCatGrid").querySelector("input:checked")?.value || categories[0];
   const repeat = !editing && entryKind !== "planned" && $("eRepeat").checked;
   if (editing) { saveEdit({ amount, date, note, category }); return; }
@@ -1018,33 +1024,21 @@ function saveEdit({ amount, date, note, category }) {
   } });
 }
 
-// A loan entry: "gave" or "got" with a person. A new name creates the person, in the same batch as the entry.
-// Editing can move the entry to another existing person.
+// A loan: lent ("gave") or borrowed ("got") with someone. A new name creates the person, in the same batch.
+// Editing can move the loan to someone else, but can't make it smaller than what's already been paid back.
 function submitLoan({ amount, date, note, due }) {
-  const dir = loanDir(), txn = editing?.col === "loanTxns" ? editing.item : null;
+  const dir = loanDir(), item = editing?.col === "loans" ? editing.item : null;
   const { person, typed, isNew } = sheetPerson();
   if (!person && !typed) {
     fieldError("ePersonErr", t(isNew ? "needName" : "pickPerson"));
     (isNew ? $("ePersonNew") : $("ePeople").querySelector("input"))?.focus();
     return;
   }
-  if (txn && !person) { closeDialog($("entryDialog")); toast(t("personGone"), { error: true }); return; } // deleted elsewhere meanwhile
+  const st = item && loanState().byId.get(item.id);
+  if (st && amount < st.paid) { amountError(t("amountBelowPaid", { amt: fmt(st.paid) })); return; }
+  if (st?.payments.length && date > st.payments[0].date) { fieldError("eDateErr", t("loanAfterPayment")); $("eDate").focus(); return; }
   const name = person ? person.name : typed; // an existing person keeps their spelling, whatever was typed
   closeDialog($("entryDialog"));
-  const uid = user.uid;
-
-  if (txn) {
-    const { id, ...before } = txn;
-    const changes = { dir, amount, date, note, personId: person.id };
-    const dueChanged = due !== (before.due || "");
-    if (!dueChanged && Object.keys(changes).every(k => changes[k] === (before[k] ?? (k === "note" ? "" : undefined)))) return;
-    if (dueChanged) changes.due = due || deleteField();
-    const ref = doc(db, "users", uid, "loanTxns", id);
-    writeInBackground(updateDoc(ref, changes));
-    toast(t("entryUpdated"), { actionLabel: t("undo"), onAction: () => { writeInBackground(setDoc(ref, before)); toast(t("restored")); } });
-    return;
-  }
-  const prev = person ? loanState().byId.get(person.id)?.balance || 0 : 0;
   const ops = [];
   let pid = person?.id;
   if (!pid) {
@@ -1052,12 +1046,44 @@ function submitLoan({ amount, date, note, due }) {
     pid = ref.id;
     ops.push(b => b.set(ref, { name, createdAt: Date.now() }));
   }
-  const txnRef = doc(userCol("loanTxns"));
+  if (item) {
+    const { id, ...before } = item;
+    const changes = { dir, amount, date, note, personId: pid };
+    const dueChanged = due !== (before.due || "");
+    if (!dueChanged && Object.keys(changes).every(k => changes[k] === (before[k] ?? (k === "note" ? "" : undefined)))) return;
+    if (dueChanged) changes.due = due || deleteField();
+    const ref = doc(db, "users", user.uid, "loans", id);
+    writeAll([...ops, b => b.update(ref, changes)]);
+    toast(t("entryUpdated"), { actionLabel: t("undo"), onAction: () => { writeInBackground(setDoc(ref, before)); toast(t("restored")); } });
+    return;
+  }
+  const ref = doc(userCol("loans"));
   const data = { personId: pid, dir, amount, date, note, createdAt: Date.now() };
   if (due) data.due = due;
-  ops.push(b => b.set(txnRef, data));
-  writeAll(ops);
-  toast(t("savedStatus", { status: statusText(name, balanceWith(prev, { dir, amount })) }));
+  writeAll([...ops, b => b.set(ref, data)]);
+  toast(t(dir === "gave" ? "lentAdded" : "borrowedAdded", { name, amt: fmt(amount) }));
+}
+
+// A payment on a loan: at most what's left on it, and not before the loan itself
+function submitPayment({ amount, date, note }) {
+  const item = editing?.col === "loanPayments" ? editing.item : null;
+  const st = payFor && loanState().byId.get(payFor.loan.id);
+  if (!st) { closeDialog($("entryDialog")); toast(t("loanGone"), { error: true }); return; } // deleted elsewhere meanwhile
+  const max = maxPayment(st, item);
+  if (amount > max) { amountError(t("payTooMuch", { amt: fmt(max) })); return; }
+  if (date < st.loan.date) { fieldError("eDateErr", t("payBeforeLoan")); $("eDate").focus(); return; }
+  closeDialog($("entryDialog"));
+  if (item) {
+    const { id, ...before } = item, changes = { amount, date, note };
+    if (Object.keys(changes).every(k => changes[k] === (before[k] ?? (k === "note" ? "" : undefined)))) return;
+    const ref = doc(db, "users", user.uid, "loanPayments", id);
+    writeInBackground(updateDoc(ref, changes));
+    toast(t("entryUpdated"), { actionLabel: t("undo"), onAction: () => { writeInBackground(setDoc(ref, before)); toast(t("restored")); } });
+    return;
+  }
+  writeInBackground(addDoc(userCol("loanPayments"), { loanId: st.loan.id, amount, date, note, createdAt: Date.now() }));
+  const left = Math.round((max - amount) * 100) / 100;
+  toast(left > 0 ? t("paymentLeft", { amt: fmt(left) }) : t("paymentSettled"));
 }
 
 function openRename(person) {
@@ -1082,19 +1108,19 @@ function openRename(person) {
   input.select();
 }
 
-// Deletes the person and every entry with them; Undo restores all of it with the same ids.
-// Entries go before the person (and come back after it), so a batch split can't leave entries with nobody.
-async function deletePerson(person) {
-  const txns = loanTxns.filter(x => x.personId === person.id);
-  if (!(await confirmAction(t("confirmDelPerson", { name: person.name, n: fmtInt(txns.length) }), t("delete")))) return;
+// Deletes the loan and its payments (asking first if it has any); Undo restores all of it with the same ids.
+// Payments go before the loan (and come back after it), so a batch split can't leave payments with no loan.
+async function deleteLoan(st) {
+  const n = st.payments.length;
+  if (n && !(await confirmAction(t("confirmDelLoan", { n: fmtInt(n) }), t("delete")))) return;
   const uid = user.uid;
-  const pRef = doc(db, "users", uid, "people", person.id);
-  const { id, ...pData } = person;
-  const saved = txns.map(({ id: tid, ...data }) => [doc(db, "users", uid, "loanTxns", tid), data]);
-  writeAll([...saved.map(([ref]) => b => b.delete(ref)), b => b.delete(pRef)]);
-  if (selectedPerson === person.id) { selectedPerson = null; syncHash(false); renderLists(); }
-  toast(t("deletedPerson", { name: person.name }), { actionLabel: t("undo"), onAction: () => {
-    writeAll([b => b.set(pRef, pData), ...saved.map(([ref, data]) => b => b.set(ref, data))]);
+  const lRef = doc(db, "users", uid, "loans", st.loan.id);
+  const { id, ...lData } = st.loan;
+  const saved = st.payments.map(({ id: pid, leftAfter, ...data }) => [doc(db, "users", uid, "loanPayments", pid), data]);
+  writeAll([...saved.map(([ref]) => b => b.delete(ref)), b => b.delete(lRef)]);
+  if (selectedLoan === st.loan.id) { selectedLoan = null; syncHash(false); renderLists(); }
+  toast(t("deletedLoan"), { actionLabel: t("undo"), onAction: () => {
+    writeAll([b => b.set(lRef, lData), ...saved.map(([ref, data]) => b => b.set(ref, data))]);
     toast(t("restored"));
   } });
 }
@@ -1137,7 +1163,7 @@ function init() {
       document.body.dataset.auth = "out";
       queuedFromBefore = false;
       expenses = []; income = []; planned = []; budgets = {}; recurring = []; recurringIncome = [];
-      people = []; loanTxns = [];
+      people = []; loans = []; loanPayments = [];
       categories = [...DEFAULT_CATEGORIES];
       editingBudgets = false;
       applyStartDay(DEFAULT_START_DAY);
@@ -1174,7 +1200,8 @@ function subscribeAll() {
   const listenLoans = (name, assign) => onSnapshot(userCol(name),
     s => { assign(mapDocs(s)); loansPending.delete(name); renderAll(); },
     e => { loansPending.delete(name); onErr(e); });
-  unsubs.push(listenLoans("people", docs => { people = docs; }), listenLoans("loanTxns", docs => { loanTxns = docs; }));
+  unsubs.push(listenLoans("people", docs => { people = docs; }), listenLoans("loans", docs => { loans = docs; }),
+    listenLoans("loanPayments", docs => { loanPayments = docs; }));
 }
 
 // Listens to expenses, income and planned items for the selected period only
@@ -1201,7 +1228,7 @@ const sortAsc = arr => [...arr].sort((a, b) => (a.date || "").localeCompare(b.da
 const MONTH_COLS = ["expenses", "income", "planned"];
 let monthPending = new Set(MONTH_COLS);
 // Loan money counts towards "Left to spend", so the summary is settled only once loans have loaded too
-const LOAN_COLS = ["people", "loanTxns"];
+const LOAN_COLS = ["people", "loans", "loanPayments"];
 let loansPending = new Set(LOAN_COLS);
 let lastRenderSettled = false;
 
@@ -1393,17 +1420,24 @@ function budgetInfo(c, byCat) {
   return { c, b, s, ratio, over: b > 0 && s > b, near: b > 0 && s <= b && ratio >= NEAR_LIMIT };
 }
 
-// Derived loan state, recomputed only when a loan snapshot replaces one of the arrays
+// Derived loan state, recomputed only when a loan snapshot replaces one of the arrays.
+// persons: per person, the net of what's open with them (+ they owe you) and when they last came up, for the sheet's chips.
 let loanMemo = null;
 function loanState() {
-  if (loanMemo && loanMemo.people === people && loanMemo.txns === loanTxns) return loanMemo;
-  const entries = balances(people, loanTxns);
+  if (loanMemo && loanMemo.people === people && loanMemo.loans === loans && loanMemo.pays === loanPayments) return loanMemo;
+  const states = loanStates(people, loans, loanPayments);
+  const byPerson = new Map(people.map(p => [p.id, { person: p, balance: 0, last: "" }]));
+  for (const st of states) {
+    const e = byPerson.get(st.person.id), lastPay = st.payments.at(-1)?.date || "";
+    e.balance = Math.round((e.balance + (st.loan.dir === "gave" ? st.left : -st.left)) * 100) / 100;
+    e.last = [e.last, st.loan.date || "", lastPay].sort().at(-1);
+  }
   return (loanMemo = {
-    people, txns: loanTxns, entries, totals: totals(entries),
-    byId: new Map(entries.map(e => [e.person.id, e]))
+    people, loans, pays: loanPayments, states, totals: totals(states), persons: [...byPerson.values()],
+    byId: new Map(states.map(st => [st.loan.id, st]))
   });
 }
-const loanFlowNow = () => { const { start, end } = currentRange(), { byId } = loanState(); return flowBetween(loanTxns, start, end, id => byId.has(id)); };
+const loanFlowNow = () => { const { start, end } = currentRange(); return flowBetween(loanState().states, start, end); };
 
 function renderSummary(animate) {
   $("monthLabel").textContent = periodLabel(selectedMonth);
@@ -1610,127 +1644,132 @@ function renderRecBanner(boxId, rules, existing, col, kind) {
     h("button", { type: "button", class: "btn primary", onclick: guard(() => applyRecurringTo(rules, col, existing, kind)) }, t("addAll")));
 }
 
-// ----- Loans: list of people with their balance, or one person's history -----
+// ----- Loans: the list of loans, or one loan with its payments -----
 const personIcon = p => h("span", { class: `cat-icon person-icon tone-${hashStr(p.id) % 8}`, "aria-hidden": "true", text: ([...cleanName(p.name)][0] || "?").toUpperCase() });
-const peopleText = n => t(new Intl.PluralRules(LOCALES[lang]).select(n) === "one" ? "onePerson" : "nPeople", { n: fmtInt(n) });
+const plural = (n, one, many) => t(new Intl.PluralRules(LOCALES[lang]).select(n) === "one" ? one : many, { n: fmtInt(n) });
+const loanCountText = n => plural(n, "oneLoan", "nLoans");
 const balanceClass = b => (b > 0 ? "pos" : b < 0 ? "owe" : "settled");
 const balanceLabel = b => t(b > 0 ? "owesYou" : b < 0 ? "youOweThem" : "settled");
-const dirLabel = dir => t(dir === "gave" ? "youGave" : "youGot");
-// "Rahim owes you ৳500" / "You owe Rahim ৳500" / "You and Rahim are settled"
-function statusText(name, balance) {
-  if (balance > 0) return t("statusOwesYou", { name, amt: fmt(balance) });
-  if (balance < 0) return t("statusYouOwe", { name, amt: fmt(-balance) });
-  return t("statusSettled", { name });
-}
-const afterText = b => (b > 0 ? t("afterOwesYou", { amt: fmt(b) }) : b < 0 ? t("afterYouOwe", { amt: fmt(-b) }) : t("afterSettled"));
+const dirLabel = dir => t(dir === "gave" ? "youGave" : "youGot"); // "You lent" / "You borrowed"
+const loanTone = st => (st.settled ? "settled" : st.loan.dir === "gave" ? "pos" : "owe");
+const dueOf = st => (!st.settled && isValidDue(st.loan.due) ? st.loan.due : "");
+// Open loans with a due date first, soonest (so most overdue) on top; then the rest, newest first
+const byDueThenNewest = (a, b) => {
+  const da = dueOf(a), db = dueOf(b);
+  return (!!db - !!da) || (da && db ? da.localeCompare(db) : 0)
+    || (b.loan.date || "").localeCompare(a.loan.date || "") || (b.loan.createdAt || 0) - (a.loan.createdAt || 0);
+};
 
 function renderLoans() {
   const st = loanState();
-  // A person in the URL who doesn't exist (deleted, or a stale link) falls back to the list once loans have loaded
-  if (selectedPerson && !st.byId.has(selectedPerson) && loansPending.size === 0) {
-    selectedPerson = null;
+  // A loan in the URL that doesn't exist (deleted, or a stale link) falls back to the list once loans have loaded
+  if (selectedLoan && !st.byId.has(selectedLoan) && loansPending.size === 0) {
+    selectedLoan = null;
     if (currentTab === "loans") syncHash(false);
   }
-  $("loansOverview").hidden = !!selectedPerson;
-  $("personView").hidden = !selectedPerson;
+  $("loansOverview").hidden = !!selectedLoan;
+  $("loanView").hidden = !selectedLoan;
   renderLoanOverview(st);
-  renderPersonView(selectedPerson ? st.byId.get(selectedPerson) : null);
+  renderLoanView(selectedLoan ? st.byId.get(selectedLoan) : null);
 }
 
-// People rows are links (#/loans?p=id), so they work with the keyboard and back/forward
-const personRow = e => h("a", {
-  class: "row tappable person-row", "data-key": "people:" + e.person.id, "data-person": e.person.id,
-  href: hashFor("loans", selectedMonth, e.person.id)
-},
-  personIcon(e.person),
-  h("div", { class: "row-info" }, h("div", { class: "row-title", text: e.person.name }),
-    h("div", { class: `row-sub${isOverdue(e.nextDue) ? " overdue" : ""}`,
-      text: [balanceLabel(e.balance), e.nextDue ? (isOverdue(e.nextDue) ? t("overdue") : dueText(e.nextDue)) : e.last ? t("lastOn", { date: fmtDate(e.last) }) : null].filter(Boolean).join(" · ") })),
-  e.balance ? h("span", { class: `row-amt num ${balanceClass(e.balance)}`, text: fmt(Math.abs(e.balance)) }) : null,
-  h("span", { class: "row-chev" }, svg("chevron", 18)));
+// Loan rows are links (#/loans?l=id), so they work with the keyboard and back/forward
+const loanRow = st => {
+  const due = dueOf(st);
+  const status = st.settled ? (st.settledOn ? t("settledOn", { date: fmtDate(st.settledOn) }) : t("settled"))
+    : due ? (isOverdue(due) ? t("overdue") : dueText(due)) : null;
+  return h("a", {
+    class: "row tappable person-row", "data-key": "loans:" + st.loan.id, "data-loan": st.loan.id,
+    href: hashFor("loans", selectedMonth, st.loan.id)
+  },
+    personIcon(st.person),
+    h("div", { class: "row-info" }, h("div", { class: "row-title", text: st.person.name }),
+      h("div", { class: `row-sub${isOverdue(due) ? " overdue" : ""}`, text: [dirLabel(st.loan.dir), status, st.loan.note || null].filter(Boolean).join(" · ") })),
+    h("span", { class: `row-amt num ${st.settled ? "" : loanTone(st)}`, text: fmt(st.settled ? st.loan.amount : st.left) }),
+    h("span", { class: "row-chev" }, svg("chevron", 18)));
+};
 
 function renderLoanOverview(st) {
   const { owedToYou, youOwe, toYouN, youOweN } = st.totals;
   const tot = $("loanTotals");
   if (!unchanged(tot, st.totals, lang)) tot.replaceChildren(
     h("div", { class: "lt-item" }, h("div", { class: "label", text: t("owedToYou") }),
-      h("div", { class: `lt-value num ${owedToYou ? "pos" : ""}`, text: fmt(owedToYou) }), h("div", { class: "lt-sub", text: peopleText(toYouN) })),
+      h("div", { class: `lt-value num ${owedToYou ? "pos" : ""}`, text: fmt(owedToYou) }), h("div", { class: "lt-sub", text: loanCountText(toYouN) })),
     h("div", { class: "lt-item" }, h("div", { class: "label", text: t("youOwe") }),
-      h("div", { class: `lt-value num ${youOwe ? "owe" : ""}`, text: fmt(youOwe) }), h("div", { class: "lt-sub", text: peopleText(youOweN) })));
+      h("div", { class: `lt-value num ${youOwe ? "owe" : ""}`, text: fmt(youOwe) }), h("div", { class: "lt-sub", text: loanCountText(youOweN) })));
 
-  const notes = new Map();
-  loanTxns.forEach(x => { if (x.note) notes.set(x.personId, (notes.get(x.personId) || "") + " " + x.note); });
-  const visible = st.entries.filter(e => matchesSearch(e.person.name, notes.get(e.person.id)));
-  // Overdue first (longest overdue on top), then the biggest balances
-  const open = visible.filter(e => e.balance !== 0).sort((a, b) =>
-    (isOverdue(b.nextDue) - isOverdue(a.nextDue)) || (isOverdue(a.nextDue) && a.nextDue.localeCompare(b.nextDue))
-    || Math.abs(b.balance) - Math.abs(a.balance) || a.person.name.localeCompare(b.person.name));
-  const settled = visible.filter(e => e.balance === 0).sort((a, b) => (b.last || "").localeCompare(a.last || "") || a.person.name.localeCompare(b.person.name));
-  $("peopleCount").textContent = st.entries.length ? peopleText(st.entries.length) : "";
+  const visible = st.states.filter(x => matchesSearch(x.person.name, x.loan.note, ...x.payments.map(p => p.note)));
+  const open = visible.filter(x => !x.settled).sort(byDueThenNewest);
+  const settled = visible.filter(x => x.settled).sort((a, b) => (b.settledOn || "").localeCompare(a.settledOn || "") || byDueThenNewest(a, b));
+  $("loanCount").textContent = open.length ? loanCountText(open.length) : "";
 
   const openBox = $("loanOpen"), settledBox = $("loanSettled");
   const sig = [lang, todayISO(), selectedMonth];
-  if (!st.entries.length) {
+  if (!st.states.length) {
     if (!unchanged(openBox, "none", sig)) openBox.replaceChildren(emptyState({ msg: t("noLoans"), actionLabel: t("addLoan"), onAction: () => openLoanSheet() }));
   } else if (!visible.length) {
     if (!unchanged(openBox, "nomatch", sig)) openBox.replaceChildren(emptyState({ msg: t("noMatches") }));
-  } else if (!unchanged(openBox, open, sig)) openBox.replaceChildren(...open.map(personRow));
-  if (!unchanged(settledBox, settled, sig)) settledBox.replaceChildren(...settled.map(personRow));
+  } else if (!open.length) {
+    if (!unchanged(openBox, "allsettled", sig)) openBox.replaceChildren(emptyState({ msg: t("noOpenLoans") }));
+  } else if (!unchanged(openBox, open, sig)) openBox.replaceChildren(...open.map(loanRow));
+  if (!unchanged(settledBox, settled, sig)) settledBox.replaceChildren(...settled.map(loanRow));
   $("settledHead").hidden = !settled.length;
 }
 
-function renderPersonView(entry) {
-  const card = $("personCard"), box = $("loanTimeline");
-  if (!entry) {
+function renderLoanView(st) {
+  const card = $("loanCard"), box = $("loanTimeline");
+  if (!st) {
     [card, box].forEach(el => { lastRendered.delete(el); el.replaceChildren(); });
     $("historyCount").textContent = "";
     return;
   }
-  const { person, balance } = entry;
-  // The settling direction is the primary action: "I got" when they owe you, "I gave" when you owe them
-  const action = dir => h("button", {
-    type: "button", class: `btn ${(dir === "got" ? balance > 0 : balance < 0) ? "primary" : "secondary"}`,
-    onclick: () => openLoanSheet({ personId: person.id, dir })
-  }, svg(dir, 18), t(dir === "gave" ? "iGave" : "iGot"));
-  if (!unchanged(card, person, balance, entry.nextDue, todayISO(), lang, selectedMonth)) card.replaceChildren(
+  const { loan, person } = st, due = dueOf(st);
+  const pct = Math.round(st.paid / Number(loan.amount) * 100);
+  if (!unchanged(card, loan, person, st.paid, st.settledOn, todayISO(), lang, selectedMonth)) card.replaceChildren(
     h("div", { class: "person-top" },
-      h("a", { class: "back-link", href: hashFor("loans", selectedMonth) }, svg("back", 18), t("peopleTitle")),
+      h("a", { class: "back-link", href: hashFor("loans", selectedMonth) }, svg("back", 18), t("tabLoans")),
       h("button", { type: "button", class: "icon-btn", "aria-haspopup": "menu", "aria-expanded": "false", "aria-label": t("moreActions", { name: person.name }),
         onclick: e => openMenu(e.currentTarget, [
-          { icon: "edit", label: t("rename"), onSelect: () => openRename(person) },
-          { icon: "trash", label: t("deletePerson"), danger: true, onSelect: guard(() => deletePerson(person)) }
+          { icon: "edit", label: t("editLoan"), onSelect: () => openLoanSheet({ item: loan }) },
+          { icon: "user", label: t("renamePerson", { name: person.name }), onSelect: () => openRename(person) },
+          { icon: "trash", label: t("deleteLoan"), danger: true, onSelect: guard(() => deleteLoan(st)) }
         ]) }, svg("more", 20))),
-    h("div", { class: "person-id" }, personIcon(person), h("h2", { class: "person-name", text: person.name })),
+    h("div", { class: "person-id" }, personIcon(person),
+      h("div", { class: "loan-who" }, h("h2", { class: "person-name", text: person.name }),
+        h("div", { class: "loan-meta", text: [t(loan.dir === "gave" ? "lentOn" : "borrowedOn", { amt: fmt(loan.amount), date: fmtDate(loan.date) }), loan.note || null].filter(Boolean).join(" · ") }))),
     h("div", { class: "person-bal" },
-      h("div", { class: "label", text: balanceLabel(balance) }),
-      h("div", { class: `person-amt num ${balanceClass(balance)}`, text: fmt(Math.abs(balance)) }),
-      entry.nextDue ? h("div", { class: `due-line${isOverdue(entry.nextDue) ? " overdue" : ""}`, text: dueText(entry.nextDue) }) : null),
-    h("div", { class: "person-actions" }, action("gave"), action("got")));
+      h("div", { class: "label", text: t(st.settled ? "settled" : loan.dir === "gave" ? "leftToGet" : "leftToPay") }),
+      h("div", { class: `person-amt num ${loanTone(st)}`, text: fmt(st.settled ? loan.amount : st.left) }),
+      h("div", { class: `loan-progress ${loanTone(st)}`, "aria-hidden": "true" }, h("span", { style: `width: ${pct}%` })),
+      h("div", { class: "due-line", text: t("paidOf", { paid: fmt(st.paid), total: fmt(loan.amount) }) }),
+      due ? h("div", { class: `due-line${isOverdue(due) ? " overdue" : ""}`, text: dueText(due) }) : null,
+      st.settled && st.settledOn ? h("div", { class: "due-line", text: t("settledOn", { date: fmtDate(st.settledOn) }) }) : null),
+    st.settled ? null : h("div", { class: "person-actions single" },
+      h("button", { type: "button", class: "btn primary", onclick: () => openPaymentSheet({ loanId: loan.id }) }, svg("plus", 18), t("addPayment"))));
 
-  const hist = personHistory(loanTxns, person.id).reverse(); // newest first
-  $("historyCount").textContent = t("entries", { n: fmtInt(hist.length) });
-  // The empty state's button belongs to this person, so a different person always rebuilds the list
-  if (box.dataset.person !== person.id) { lastRendered.delete(box); box.dataset.person = person.id; }
-  renderGrouped("loanTimeline", hist.filter(x => matchesSearch(x.note, dirLabel(x.dir))), loanTxnRow,
-    searchQ ? { msg: t("noMatches") } : { msg: t("noLoanTxns"), actionLabel: t("addLoan"), onAction: () => openLoanSheet({ personId: person.id }) });
+  const list = [...st.payments].reverse(); // newest first
+  $("historyCount").textContent = list.length ? plural(list.length, "onePayment", "nPayments") : "";
+  // The empty state's button belongs to this loan, so a different loan always rebuilds the list
+  if (box.dataset.loan !== loan.id) { lastRendered.delete(box); box.dataset.loan = loan.id; }
+  renderGrouped("loanTimeline", list.filter(p => matchesSearch(p.note)), paymentRow(st),
+    searchQ ? { msg: t("noMatches") } : st.settled ? { msg: t("noPayments") }
+      : { msg: t("noPayments"), actionLabel: t("addPayment"), onAction: () => openPaymentSheet({ loanId: loan.id }) });
 }
 
-// `after` (running balance) and `open` (amount outstanding) are display-only; strip them before writing the entry back
-const rawTxn = ({ after, open, ...x }) => x;
-// The due date shows only while part of the entry is still outstanding (repayments pay off the oldest first)
-const loanTxnRow = x => { const due = x.open > 0 && isValidDue(x.due) ? x.due : ""; return entryRow({
-  key: "loanTxns:" + x.id,
-  icon: h("span", { class: `cat-icon ${x.dir === "got" ? "tone-5" : "tone-0"}` }, svg(x.dir)),
-  title: x.note || dirLabel(x.dir),
-  sub: [x.note ? dirLabel(x.dir) : null, due ? dueText(due) : afterText(x.after)].filter(Boolean).join(" · "),
-  subClass: isOverdue(due) ? "overdue" : "",
-  amount: (x.dir === "got" ? "+" : "−") + fmt(x.amount), amountClass: x.dir === "got" ? "pos" : "",
+// `leftAfter` is display-only; strip it before writing the payment back
+const rawPayment = ({ leftAfter, ...p }) => p;
+const paymentRow = st => p => entryRow({
+  key: "loanPayments:" + p.id,
+  icon: h("span", { class: `cat-icon ${st.loan.dir === "gave" ? "tone-5" : "tone-0"}` }, svg(st.loan.dir === "gave" ? "got" : "gave")),
+  title: p.note || t(st.loan.dir === "gave" ? "repaidToYou" : "youRepaid"),
+  sub: [p.note ? t(st.loan.dir === "gave" ? "repaidToYou" : "youRepaid") : null, p.leftAfter > 0 ? t("leftAfter", { amt: fmt(p.leftAfter) }) : t("paidInFull")].filter(Boolean).join(" · "),
+  amount: (st.loan.dir === "gave" ? "+" : "−") + fmt(p.amount), amountClass: st.loan.dir === "gave" ? "pos" : "",
   menu: [
-    { icon: "edit", label: t("edit"), onSelect: () => openLoanSheet({ txn: rawTxn(x) }) },
-    { icon: "trash", label: t("delete"), danger: true, onSelect: guard(() => deleteWithUndo("loanTxns", rawTxn(x), t("deletedLoanTxn"))) }
+    { icon: "edit", label: t("edit"), onSelect: () => openPaymentSheet({ item: rawPayment(p) }) },
+    { icon: "trash", label: t("delete"), danger: true, onSelect: guard(() => deleteWithUndo("loanPayments", rawPayment(p), t("deletedPayment"))) }
   ],
-  onOpen: () => openLoanSheet({ txn: rawTxn(x) })
-}); };
+  onOpen: () => openPaymentSheet({ item: rawPayment(p) })
+});
 
 // ----- Budgets -----
 function renderBudgets() {

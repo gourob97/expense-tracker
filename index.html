@@ -268,15 +268,15 @@ try {
         </div>
       </div>
 
-      <!-- Loans: all-time balances per person, not tied to the viewed month -->
+      <!-- Loans: each loan on its own with its payments, not tied to the viewed month -->
       <div class="tab-panel cols single" data-panel="loans" hidden>
         <div class="col-main">
           <div class="loans-overview" id="loansOverview">
             <section class="card loan-totals" id="loanTotals" aria-label="Loan totals" data-i18n-aria="loanTotalsLabel"></section>
-            <section class="card list-card" aria-labelledby="peopleTitle">
+            <section class="card list-card" aria-labelledby="openLoansTitle">
               <div class="card-head">
-                <h2 id="peopleTitle" data-i18n="peopleTitle">People</h2>
-                <span class="muted" id="peopleCount"></span>
+                <h2 id="openLoansTitle" data-i18n="openLoans">Open loans</h2>
+                <span class="muted" id="loanCount"></span>
               </div>
               <div id="loanOpen" class="flat"></div>
               <h3 class="sub-head" id="settledHead" data-i18n="settledHead" hidden>Settled</h3>
@@ -284,11 +284,11 @@ try {
               <p class="hint" data-i18n="loansHint">Loans aren’t income or spending. Record what you buy with borrowed money as a normal expense; paying a loan back isn’t an expense.</p>
             </section>
           </div>
-          <div class="person-view" id="personView" hidden>
-            <section class="card person-card" id="personCard"></section>
+          <div class="person-view" id="loanView" hidden>
+            <section class="card person-card" id="loanCard"></section>
             <section class="card list-card" aria-labelledby="historyTitle">
               <div class="card-head">
-                <h2 id="historyTitle" data-i18n="historyTitle">History</h2>
+                <h2 id="historyTitle" data-i18n="paymentsTitle">Payments</h2>
                 <span class="muted" id="historyCount"></span>
               </div>
               <div id="loanTimeline" class="grouped"></div>
