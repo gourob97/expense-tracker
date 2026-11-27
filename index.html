@@ -40,6 +40,8 @@ input:focus,select:focus{outline:1px solid var(--accent);border-color:var(--acce
 .amt{flex:0 0 110px;text-align:right;font-family:ui-monospace,Menlo,monospace;font-weight:600;white-space:nowrap}
 .catrow{padding:7px 0;border-bottom:1px solid var(--line)}
 .catrow:last-child{border-bottom:0}
+.chip{display:inline-flex;align-items:center;gap:6px;border:1px solid var(--line);border-radius:3px;padding:3px 4px 3px 8px;font-size:12px}
+.chip button{padding:0 6px;background:transparent;color:var(--muted);border:0;font-size:14px;line-height:1}
 .hidden{display:none!important}
 #status{min-height:1em;font-size:12px}
 </style>
@@ -132,6 +134,11 @@ input:focus,select:focus{outline:1px solid var(--accent);border-color:var(--acce
 
       <section class="panel">
         <h2>Categories &amp; budgets</h2>
+        <div class="row" style="margin-bottom:10px">
+          <input type="text" id="newCat" placeholder="New category name" maxlength="30">
+          <button class="ghost" type="button" id="addCatBtn">Add category</button>
+        </div>
+        <div id="catChips" class="row" style="margin-bottom:12px"></div>
         <p class="muted" style="margin:0 0 6px">Leave a budget empty for no limit. Bars turn red when you go over.</p>
         <div id="cats"></div>
         <div class="row" style="margin-top:12px"><button id="saveBudgets">Save budgets</button></div>
@@ -181,11 +188,12 @@ const firebaseConfig = {
 };
 // ===============================
 
-const CATEGORIES = ["Food","Transport","Bills","Rent","Shopping","Health","Entertainment","Other"];
+const DEFAULT_CATEGORIES = ["Food","Transport","Bills","Rent","Shopping","Health","Entertainment","Other"];
 const $ = id => document.getElementById(id);
 const pad = n => String(n).padStart(2, "0");
 const todayISO = () => { const d = new Date(); return `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}`; };
 const fmt = n => "৳" + Number(n || 0).toLocaleString("en-US", { maximumFractionDigits: 2 });
+const signed = n => (n < 0 ? "-" : "") + fmt(Math.abs(n));
 const sum = arr => arr.reduce((s, x) => s + Number(x.amount), 0);
 const setStatus = (msg, isErr) => { const s = $("status"); s.textContent = msg || ""; s.style.color = isErr ? "var(--danger)" : ""; };
 const onErr = e => setStatus(e.message, true);
@@ -210,6 +218,7 @@ initTheme();
 // ----- State -----
 let selectedMonth = todayISO().slice(0, 7);
 let user = null;
+let categories = [...DEFAULT_CATEGORIES];
 let expenses = [], income = [], planned = [], budgets = {}, recurring = [], recurringIncome = [];
 let unsubs = [], monthUnsubs = [];
 let auth, db;
@@ -226,12 +235,8 @@ if (!configured) {
 }
 
 function init() {
-  CATEGORIES.forEach(c => {
-    $("category").add(new Option(c, c));
-    $("rCategory").add(new Option(c, c));
-    $("pCategory").add(new Option(c, c));
-  });
   buildCategoryRows();
+  fillCategorySelects();
   $("month").value = selectedMonth;
   $("date").value = todayISO();
   $("iDate").value = todayISO();
@@ -245,6 +250,7 @@ function init() {
   $("planForm").onsubmit = e => { e.preventDefault(); guard(addPlanned)(); };
   $("recForm").onsubmit = e => { e.preventDefault(); guard(addRecurring)(); };
   $("recIncForm").onsubmit = e => { e.preventDefault(); guard(addRecurringIncome)(); };
+  $("addCatBtn").onclick = guard(addCategory);
   $("saveBudgets").onclick = guard(saveBudgets);
   $("applyRec").onclick = guard(() => applyRecurringTo(recurring, "expenses", expenses, "recurring expense"));
   $("applyRecIncome").onclick = guard(() => applyRecurringTo(recurringIncome, "income", income, "recurring income"));
@@ -262,6 +268,8 @@ function init() {
       $("appCards").classList.add("hidden");
       $("who").textContent = "";
       expenses = []; income = []; planned = []; budgets = {}; recurring = []; recurringIncome = [];
+      categories = [...DEFAULT_CATEGORIES];
+      onCategoriesChanged();
     }
   });
 }
@@ -283,9 +291,13 @@ const mapDocs = s => s.docs.map(d => ({ id: d.id, ...d.data() }));
 
 function subscribeAll() {
   subscribeMonth();
+  unsubs.push(onSnapshot(doc(db, "users", user.uid, "settings", "categories"), s => {
+    categories = s.exists() && Array.isArray(s.data().list) ? s.data().list : [...DEFAULT_CATEGORIES];
+    onCategoriesChanged();
+  }, onErr));
   unsubs.push(onSnapshot(doc(db, "users", user.uid, "settings", "budgets"), s => {
     budgets = s.exists() ? s.data() : {};
-    CATEGORIES.forEach(c => { $("b-" + c).value = budgets[c] ?? ""; });
+    categories.forEach(c => { $("b-" + c).value = budgets[c] ?? ""; });
     renderMonth();
   }, onErr));
   unsubs.push(onSnapshot(collection(db, "users", user.uid, "recurring"), s => {
@@ -324,21 +336,109 @@ function jumpToMonth(date) {
   }
 }
 
+// ----- Categories -----
+
+// Called whenever the category list changes (from Firestore or a local edit)
+function onCategoriesChanged() {
+  fillCategorySelects();
+  buildCategoryRows();
+  renderCategoryChips();
+  renderMonth();
+}
+
+function fillCategorySelects() {
+  ["category", "pCategory", "rCategory"].forEach(id => {
+    const sel = $(id);
+    const prev = sel.value;
+    sel.replaceChildren();
+    categories.forEach(c => sel.add(new Option(c, c)));
+    if (categories.includes(prev)) sel.value = prev;
+  });
+}
+
 function buildCategoryRows() {
   const wrap = $("cats");
-  CATEGORIES.forEach(c => {
+  wrap.replaceChildren();
+  categories.forEach(c => {
     const row = document.createElement("div");
     row.className = "catrow";
-    row.innerHTML = `
-      <div class="item" style="border:0;padding:2px 0">
-        <span style="flex:1">${c}</span>
-        <span class="muted mono" id="s-${c}"></span>
-        <input type="number" min="0" step="1" placeholder="Budget" id="b-${c}" class="mono" style="max-width:120px">
-      </div>
-      <div class="bar"><div id="bar-${c}"></div></div>`;
+
+    const line = document.createElement("div");
+    line.className = "item";
+    line.style.cssText = "border:0;padding:2px 0";
+    const name = document.createElement("span");
+    name.style.flex = "1";
+    name.textContent = c;
+    const spent = document.createElement("span");
+    spent.className = "muted mono";
+    spent.id = "s-" + c;
+    const input = document.createElement("input");
+    input.type = "number";
+    input.min = "0";
+    input.step = "1";
+    input.placeholder = "Budget";
+    input.id = "b-" + c;
+    input.className = "mono";
+    input.style.maxWidth = "120px";
+    input.value = budgets[c] ?? "";
+    line.append(name, spent, input);
+
+    const bar = document.createElement("div");
+    bar.className = "bar";
+    const fill = document.createElement("div");
+    fill.id = "bar-" + c;
+    bar.append(fill);
+
+    row.append(line, bar);
     wrap.appendChild(row);
   });
 }
+
+function renderCategoryChips() {
+  const box = $("catChips");
+  box.replaceChildren();
+  categories.forEach(c => {
+    const chip = document.createElement("span");
+    chip.className = "chip";
+    const label = document.createElement("span");
+    label.textContent = c;
+    const x = document.createElement("button");
+    x.type = "button";
+    x.title = "Remove category";
+    x.textContent = "×";
+    x.onclick = guard(() => removeCategory(c));
+    chip.append(label, x);
+    box.appendChild(chip);
+  });
+}
+
+async function addCategory() {
+  const name = $("newCat").value.trim();
+  if (!name) return;
+  if (categories.some(c => c.toLowerCase() === name.toLowerCase())) {
+    setStatus(`"${name}" already exists.`, true);
+    return;
+  }
+  await setDoc(doc(db, "users", user.uid, "settings", "categories"), { list: [...categories, name] });
+  $("newCat").value = "";
+  setStatus(`Added category "${name}".`);
+}
+
+async function removeCategory(name) {
+  if (categories.length <= 1) { setStatus("Keep at least one category.", true); return; }
+  if (!confirm(`Remove "${name}"? Existing expenses keep this name, but it won't be offered in forms.`)) return;
+  await setDoc(doc(db, "users", user.uid, "settings", "categories"), {
+    list: categories.filter(c => c !== name)
+  });
+  if (budgets[name] !== undefined) {
+    const next = { ...budgets };
+    delete next[name];
+    await setDoc(doc(db, "users", user.uid, "settings", "budgets"), next);
+  }
+  setStatus(`Removed category "${name}".`);
+}
+
+// ----- Rendering -----
 
 function renderSummary() {
   const [y, m] = selectedMonth.split("-").map(Number);
@@ -354,26 +454,26 @@ function renderSummary() {
   $("afterPlanned").style.color = estimatedLeft < 0 ? "var(--danger)" : "var(--ok)";
 }
 
-function signed(n) { return (n < 0 ? "-" : "") + fmt(Math.abs(n)); }
-
 function renderMonth() {
   const total = sum(expenses);
   const byCat = {};
   expenses.forEach(e => { byCat[e.category] = (byCat[e.category] || 0) + Number(e.amount); });
 
-  CATEGORIES.forEach(c => {
-    const spent = byCat[c] || 0;
+  categories.forEach(c => {
+    const spentAmt = byCat[c] || 0;
     const budget = Number(budgets[c]) || 0;
-    let text = fmt(spent);
-    if (budget) {
-      text += ` / ${fmt(budget)} ` + (spent > budget ? `· over ${fmt(spent - budget)}` : `· left ${fmt(budget - spent)}`);
-    }
-    $("s-" + c).textContent = text;
-    // With a budget: bar = share of budget used. Without: bar = share of this month's spending.
-    const pct = budget ? Math.min(100, spent / budget * 100) : (total ? spent / total * 100 : 0);
+    const label = $("s-" + c);
     const bar = $("bar-" + c);
+    if (!label || !bar) return;
+    let text = fmt(spentAmt);
+    if (budget) {
+      text += ` / ${fmt(budget)} ` + (spentAmt > budget ? `· over ${fmt(spentAmt - budget)}` : `· left ${fmt(budget - spentAmt)}`);
+    }
+    label.textContent = text;
+    // With a budget: bar = share of budget used. Without: bar = share of this month's spending.
+    const pct = budget ? Math.min(100, spentAmt / budget * 100) : (total ? spentAmt / total * 100 : 0);
     bar.style.width = pct + "%";
-    bar.className = budget && spent > budget ? "over" : "";
+    bar.className = budget && spentAmt > budget ? "over" : "";
   });
 }
 
@@ -444,6 +544,8 @@ function renderLists() {
   })), "No recurring income yet.");
 }
 
+// ----- Writes -----
+
 async function removeItem(col, id, message) {
   if (!confirm(message)) return;
   await deleteDoc(doc(db, "users", user.uid, col, id));
@@ -501,7 +603,7 @@ async function markSpent(p) {
 
 async function saveBudgets() {
   const obj = {};
-  CATEGORIES.forEach(c => {
+  categories.forEach(c => {
     const v = Number($("b-" + c).value);
     if (v > 0) obj[c] = v;
   });
