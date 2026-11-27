@@ -9,7 +9,7 @@ const bal = (list, id) => balances(people, list).find(e => e.person.id === id);
 
 test("gave raises what they owe you, got lowers it", () => {
   const list = [tx("a", "gave", 5000, "2026-11-01"), tx("a", "got", 2000, "2026-11-10")];
-  assert.deepEqual({ ...bal(list, "a"), person: undefined }, { person: undefined, balance: 3000, count: 2, last: "2026-11-10" });
+  assert.deepEqual({ ...bal(list, "a"), person: undefined }, { person: undefined, balance: 3000, count: 2, last: "2026-11-10", nextDue: "" });
 });
 
 test("borrowing makes the balance negative; overpaying flips the sign", () => {
@@ -91,4 +91,34 @@ test("findPerson ignores case and spacing", () => {
   assert.equal(findPerson(people, "   "), null);
   assert.equal(findPerson(people, "Someone"), null);
   assert.equal(cleanName("  Abdul   Karim "), "Abdul Karim");
+});
+
+test("repayments pay off the oldest entries first", () => {
+  const list = [tx("a", "gave", 500, "2026-11-01"), tx("a", "gave", 300, "2026-11-05"), tx("a", "got", 600, "2026-11-10")];
+  assert.deepEqual(history(list, "a").map(x => x.open), [0, 200, 0]);
+});
+
+test("overpaying opens an entry the other way", () => {
+  const list = [tx("b", "got", 1000, "2026-11-01"), tx("b", "gave", 1500, "2026-11-03")];
+  assert.deepEqual(history(list, "b").map(x => x.open), [0, 500]);
+});
+
+test("next due date skips paid-off entries", () => {
+  const list = [
+    tx("a", "gave", 500, "2026-11-01", { due: "2026-11-15" }),
+    tx("a", "gave", 300, "2026-11-05", { due: "2026-12-01" }),
+    tx("a", "got", 500, "2026-11-10")
+  ];
+  assert.equal(bal(list, "a").nextDue, "2026-12-01");
+  list.push(tx("a", "got", 300, "2026-11-20"));
+  assert.equal(bal(list, "a").nextDue, "");
+});
+
+test("next due date is the earliest open one, and ignores malformed dates", () => {
+  const list = [
+    tx("c", "got", 200, "2026-11-01", { due: "2026-12-20" }),
+    tx("c", "got", 200, "2026-11-02", { due: "2026-12-05" }),
+    tx("c", "got", 200, "2026-11-03", { due: "soon" })
+  ];
+  assert.equal(bal(list, "c").nextDue, "2026-12-05");
 });

@@ -365,8 +365,15 @@ try {
     <div class="field-group">
       <label class="field-row" id="eDayRow" hidden><span data-i18n="dayOfMonthLabel">Day of month</span><select id="eDay"></select></label>
       <label class="field-row"><span data-i18n="note">Note</span><input type="text" id="eNote" maxlength="80" autocomplete="off"></label>
+      <!-- Loan only, optional: when the money should come back -->
+      <div class="field-row" id="eDueRow" hidden>
+        <label for="eDue" data-i18n="dueBy">Due by</label>
+        <input type="date" id="eDue" aria-describedby="eDueErr">
+        <button type="button" class="icon-btn due-clear" id="eDueClear" aria-label="Clear due date" data-i18n-aria="clearDue" hidden><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M18 6L6 18"/><path d="M6 6l12 12"/></svg></button>
+      </div>
       <label class="field-row" id="eRepeatRow"><span data-i18n="repeatMonthly">Repeat every month</span><input type="checkbox" role="switch" id="eRepeat" class="switch"></label>
     </div>
+    <p class="field-error" id="eDueErr" hidden></p>
     <div class="suggest" id="eSuggest" hidden></div>
 
     <!-- Stays at the bottom of the sheet while the rest scrolls -->

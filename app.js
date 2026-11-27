@@ -3,12 +3,12 @@ import { getAuth, GoogleAuthProvider, signInWithPopup, signOut, onAuthStateChang
 import {
   initializeFirestore, getFirestore, persistentLocalCache, persistentMultipleTabManager, terminate, clearIndexedDbPersistence,
   collection, doc, onSnapshot, query, where, orderBy, getDoc, getDocs, waitForPendingWrites, writeBatch,
-  addDoc as fsAddDoc, deleteDoc as fsDeleteDoc, setDoc as fsSetDoc, updateDoc as fsUpdateDoc
+  addDoc as fsAddDoc, deleteDoc as fsDeleteDoc, setDoc as fsSetDoc, updateDoc as fsUpdateDoc, deleteField
 } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
 import { STRINGS, CAT_BN } from "./i18n.js";
 import { periodRange, periodOf, shiftPeriod, dateInPeriod, addDays, daysBetween, inPeriod, isPeriodKey, normalizeStartDay, DEFAULT_START_DAY } from "./period.js";
 import { formatAmountInput } from "./amount.js";
-import { balances, totals, flowBetween, history as personHistory, balanceWith, findPerson, cleanName } from "./loans.js";
+import { balances, totals, flowBetween, history as personHistory, balanceWith, findPerson, cleanName, isValidDue } from "./loans.js";
 
 // ===== FIREBASE WEB CONFIG =====
 const firebaseConfig = {
@@ -598,12 +598,12 @@ async function exportData(format) {
       download(`expense-ledger-backup-${stamp}.json`, JSON.stringify(out, null, 2), "application/json");
     } else {
       const rows = ENTRY_COLS.flatMap(([n, type]) => data[n].map(e =>
-        [type, e.date || "", e.category || "", Number(e.amount) || 0, e.note || "", e.recurringId ? "yes" : "", ""]));
+        [type, e.date || "", e.category || "", Number(e.amount) || 0, e.note || "", e.recurringId ? "yes" : "", "", ""]));
       // Loan money: "loan gave" (lent, or repaid what you owed) and "loan got" (borrowed, or were repaid)
       const names = new Map(data.people.map(p => [p.id, p.name]));
-      data.loanTxns.forEach(x => rows.push([`loan ${x.dir}`, x.date || "", "", Number(x.amount) || 0, x.note || "", "", names.get(x.personId) || ""]));
+      data.loanTxns.forEach(x => rows.push([`loan ${x.dir}`, x.date || "", "", Number(x.amount) || 0, x.note || "", "", names.get(x.personId) || "", x.due || ""]));
       rows.sort((x, y) => (x[1] < y[1] ? -1 : x[1] > y[1] ? 1 : 0));
-      const lines = [["Type", "Date", "Category", "Amount", "Note", "Recurring", "Person"], ...rows].map(r => r.map(csvCell).join(","));
+      const lines = [["Type", "Date", "Category", "Amount", "Note", "Recurring", "Person", "Due"], ...rows].map(r => r.map(csvCell).join(","));
       // BOM so Excel reads UTF-8 (Bangla notes) correctly
       download(`expense-ledger-${stamp}.csv`, "\uFEFF" + lines.join("\r\n"), "text/csv;charset=utf-8");
     }
@@ -711,6 +711,7 @@ function setKind(kind) {
   $("eCatField").hidden = !usesCategory(kind);
   $("ePersonField").hidden = !loan;
   $("eDirField").hidden = !loan;
+  $("eDueRow").hidden = !loan;
   $("eRepeatRow").hidden = kind === "planned" || loan || !!editing;
   $("eNote").placeholder = t(kind === "income" ? "phSource" : kind === "planned" ? "phWhat" : loan ? "phLoanNote" : "phNote");
   $("entrySubmit").textContent = t(editing ? "saveChanges" : ADD_LABEL[kind]);
@@ -742,7 +743,7 @@ function updateSheet() {
 // ----- Inline errors, shown under the field they're about -----
 function fieldError(id, msg) { const el = $(id); el.textContent = msg; el.hidden = !msg; }
 function clearFieldErrors() {
-  ["eAmountErr", "ePersonErr", "eDateErr"].forEach(id => fieldError(id, ""));
+  ["eAmountErr", "ePersonErr", "eDateErr", "eDueErr"].forEach(id => fieldError(id, ""));
   $("eAmountBox").classList.remove("invalid");
   $("eAmount").removeAttribute("aria-invalid");
 }
@@ -835,6 +836,16 @@ $("eDate").addEventListener("change", syncDateChips);
 // The date input covers its chip invisibly: phones open their picker on tap; desktop browsers need showPicker()
 $("eDate").addEventListener("click", () => { try { $("eDate").showPicker(); } catch (e) { /* opens natively, or unsupported */ } });
 
+// ----- Loan due date (optional): when the money should come back -----
+function setDue(iso) { $("eDue").value = iso || ""; syncDue(); }
+function syncDue() { $("eDueClear").hidden = !$("eDue").value; fieldError("eDueErr", ""); }
+$("eDue").addEventListener("change", syncDue);
+$("eDue").addEventListener("click", () => { try { $("eDue").showPicker(); } catch (e) { /* opens natively, or unsupported */ } });
+$("eDueClear").onclick = () => { setDue(""); $("eDue").focus({ preventScroll: true }); };
+// "Due 5 Dec" / "Due today" / "Overdue since 20 Nov"
+const dueText = iso => { const today = todayISO(); return iso < today ? t("overdueSince", { date: fmtDate(iso) }) : t(iso === today ? "dueToday" : "dueOn", { date: fmtDate(iso) }); };
+const isOverdue = iso => !!iso && iso < todayISO();
+
 // ----- Note suggestions: the notes used most for this type, narrowed as you type. Picking one for an
 // expense or plan also picks the category it was last used with ("Uber" → Transport). -----
 function noteSuggestions(kind, typed) {
@@ -892,6 +903,7 @@ function openSheet(kind, col = null, item = null, { personId = null, dir = null 
   const amount = item ? item.amount : settles ? Math.abs(balance) : null;
   $("eAmount").value = amount == null ? "" : formatAmountInput(plainFmt.format(amount)).value;
   setDate(item && !rule ? item.date : defaultDate());
+  setDue(loanEdit ? item.due : "");
   if (rule) {
     $("eDay").replaceChildren(...Array.from({ length: 31 }, (_, i) => h("option", { value: i + 1, text: fmtInt(i + 1) })));
     $("eDay").value = String(item.day);
@@ -951,7 +963,12 @@ function submitEntry() {
   if (!date && !editingRule) { fieldError("eDateErr", t("dateNeeded")); bad ||= $("eDate"); }
   if (bad) { bad.focus(); return; }
   const note = $("eNote").value.trim();
-  if (entryKind === "loan") { submitLoan({ amount, date, note }); return; }
+  if (entryKind === "loan") {
+    const due = $("eDue").value;
+    if (due && date && due < date) { fieldError("eDueErr", t("dueBeforeDate")); $("eDue").focus(); return; }
+    submitLoan({ amount, date, note, due });
+    return;
+  }
   const category = $("eCatGrid").querySelector("input:checked")?.value || categories[0];
   const repeat = !editing && entryKind !== "planned" && $("eRepeat").checked;
   if (editing) { saveEdit({ amount, date, note, category }); return; }
@@ -1003,7 +1020,7 @@ function saveEdit({ amount, date, note, category }) {
 
 // A loan entry: "gave" or "got" with a person. A new name creates the person, in the same batch as the entry.
 // Editing can move the entry to another existing person.
-function submitLoan({ amount, date, note }) {
+function submitLoan({ amount, date, note, due }) {
   const dir = loanDir(), txn = editing?.col === "loanTxns" ? editing.item : null;
   const { person, typed, isNew } = sheetPerson();
   if (!person && !typed) {
@@ -1019,7 +1036,9 @@ function submitLoan({ amount, date, note }) {
   if (txn) {
     const { id, ...before } = txn;
     const changes = { dir, amount, date, note, personId: person.id };
-    if (Object.keys(changes).every(k => changes[k] === (before[k] ?? (k === "note" ? "" : undefined)))) return;
+    const dueChanged = due !== (before.due || "");
+    if (!dueChanged && Object.keys(changes).every(k => changes[k] === (before[k] ?? (k === "note" ? "" : undefined)))) return;
+    if (dueChanged) changes.due = due || deleteField();
     const ref = doc(db, "users", uid, "loanTxns", id);
     writeInBackground(updateDoc(ref, changes));
     toast(t("entryUpdated"), { actionLabel: t("undo"), onAction: () => { writeInBackground(setDoc(ref, before)); toast(t("restored")); } });
@@ -1034,7 +1053,9 @@ function submitLoan({ amount, date, note }) {
     ops.push(b => b.set(ref, { name, createdAt: Date.now() }));
   }
   const txnRef = doc(userCol("loanTxns"));
-  ops.push(b => b.set(txnRef, { personId: pid, dir, amount, date, note, createdAt: Date.now() }));
+  const data = { personId: pid, dir, amount, date, note, createdAt: Date.now() };
+  if (due) data.due = due;
+  ops.push(b => b.set(txnRef, data));
   writeAll(ops);
   toast(t("savedStatus", { status: statusText(name, balanceWith(prev, { dir, amount })) }));
 }
@@ -1482,10 +1503,10 @@ function renderFlat(boxId, items, rowFn, emptyMsg) {
 
 // onOpen: tapping the row (outside its buttons) opens the editor; the ⋯ menu's Edit does the same for keyboard users
 // key: "<collection>:<id>", which list motion uses to tell arriving and departing rows apart
-function entryRow({ key, icon, title, sub, amount, amountClass = "", menu, extra, onOpen }) {
+function entryRow({ key, icon, title, sub, subClass = "", amount, amountClass = "", menu, extra, onOpen }) {
   return h("div", { class: onOpen ? "row tappable" : "row", "data-key": key, onclick: onOpen ? e => { if (!e.target.closest("button")) onOpen(); } : null },
     icon,
-    h("div", { class: "row-info" }, h("div", { class: "row-title", text: title }), sub ? h("div", { class: "row-sub", text: sub }) : null),
+    h("div", { class: "row-info" }, h("div", { class: "row-title", text: title }), sub ? h("div", { class: `row-sub ${subClass}`.trim(), text: sub }) : null),
     h("span", { class: `row-amt num ${amountClass}`, text: amount }),
     extra || null,
     menu ? h("button", { type: "button", class: "icon-btn row-menu", "aria-haspopup": "menu", "aria-expanded": "false",
@@ -1623,7 +1644,8 @@ const personRow = e => h("a", {
 },
   personIcon(e.person),
   h("div", { class: "row-info" }, h("div", { class: "row-title", text: e.person.name }),
-    h("div", { class: "row-sub", text: [balanceLabel(e.balance), e.last ? t("lastOn", { date: fmtDate(e.last) }) : null].filter(Boolean).join(" · ") })),
+    h("div", { class: `row-sub${isOverdue(e.nextDue) ? " overdue" : ""}`,
+      text: [balanceLabel(e.balance), e.nextDue ? (isOverdue(e.nextDue) ? t("overdue") : dueText(e.nextDue)) : e.last ? t("lastOn", { date: fmtDate(e.last) }) : null].filter(Boolean).join(" · ") })),
   e.balance ? h("span", { class: `row-amt num ${balanceClass(e.balance)}`, text: fmt(Math.abs(e.balance)) }) : null,
   h("span", { class: "row-chev" }, svg("chevron", 18)));
 
@@ -1639,7 +1661,10 @@ function renderLoanOverview(st) {
   const notes = new Map();
   loanTxns.forEach(x => { if (x.note) notes.set(x.personId, (notes.get(x.personId) || "") + " " + x.note); });
   const visible = st.entries.filter(e => matchesSearch(e.person.name, notes.get(e.person.id)));
-  const open = visible.filter(e => e.balance !== 0).sort((a, b) => Math.abs(b.balance) - Math.abs(a.balance) || a.person.name.localeCompare(b.person.name));
+  // Overdue first (longest overdue on top), then the biggest balances
+  const open = visible.filter(e => e.balance !== 0).sort((a, b) =>
+    (isOverdue(b.nextDue) - isOverdue(a.nextDue)) || (isOverdue(a.nextDue) && a.nextDue.localeCompare(b.nextDue))
+    || Math.abs(b.balance) - Math.abs(a.balance) || a.person.name.localeCompare(b.person.name));
   const settled = visible.filter(e => e.balance === 0).sort((a, b) => (b.last || "").localeCompare(a.last || "") || a.person.name.localeCompare(b.person.name));
   $("peopleCount").textContent = st.entries.length ? peopleText(st.entries.length) : "";
 
@@ -1667,7 +1692,7 @@ function renderPersonView(entry) {
     type: "button", class: `btn ${(dir === "got" ? balance > 0 : balance < 0) ? "primary" : "secondary"}`,
     onclick: () => openLoanSheet({ personId: person.id, dir })
   }, svg(dir, 18), t(dir === "gave" ? "iGave" : "iGot"));
-  if (!unchanged(card, person, balance, lang, selectedMonth)) card.replaceChildren(
+  if (!unchanged(card, person, balance, entry.nextDue, todayISO(), lang, selectedMonth)) card.replaceChildren(
     h("div", { class: "person-top" },
       h("a", { class: "back-link", href: hashFor("loans", selectedMonth) }, svg("back", 18), t("peopleTitle")),
       h("button", { type: "button", class: "icon-btn", "aria-haspopup": "menu", "aria-expanded": "false", "aria-label": t("moreActions", { name: person.name }),
@@ -1678,7 +1703,8 @@ function renderPersonView(entry) {
     h("div", { class: "person-id" }, personIcon(person), h("h2", { class: "person-name", text: person.name })),
     h("div", { class: "person-bal" },
       h("div", { class: "label", text: balanceLabel(balance) }),
-      h("div", { class: `person-amt num ${balanceClass(balance)}`, text: fmt(Math.abs(balance)) })),
+      h("div", { class: `person-amt num ${balanceClass(balance)}`, text: fmt(Math.abs(balance)) }),
+      entry.nextDue ? h("div", { class: `due-line${isOverdue(entry.nextDue) ? " overdue" : ""}`, text: dueText(entry.nextDue) }) : null),
     h("div", { class: "person-actions" }, action("gave"), action("got")));
 
   const hist = personHistory(loanTxns, person.id).reverse(); // newest first
@@ -1689,20 +1715,22 @@ function renderPersonView(entry) {
     searchQ ? { msg: t("noMatches") } : { msg: t("noLoanTxns"), actionLabel: t("addLoan"), onAction: () => openLoanSheet({ personId: person.id }) });
 }
 
-// `after` (running balance) is display-only; strip it before writing the entry back
-const rawTxn = ({ after, ...x }) => x;
-const loanTxnRow = x => entryRow({
+// `after` (running balance) and `open` (amount outstanding) are display-only; strip them before writing the entry back
+const rawTxn = ({ after, open, ...x }) => x;
+// The due date shows only while part of the entry is still outstanding (repayments pay off the oldest first)
+const loanTxnRow = x => { const due = x.open > 0 && isValidDue(x.due) ? x.due : ""; return entryRow({
   key: "loanTxns:" + x.id,
   icon: h("span", { class: `cat-icon ${x.dir === "got" ? "tone-5" : "tone-0"}` }, svg(x.dir)),
   title: x.note || dirLabel(x.dir),
-  sub: [x.note ? dirLabel(x.dir) : null, afterText(x.after)].filter(Boolean).join(" · "),
+  sub: [x.note ? dirLabel(x.dir) : null, due ? dueText(due) : afterText(x.after)].filter(Boolean).join(" · "),
+  subClass: isOverdue(due) ? "overdue" : "",
   amount: (x.dir === "got" ? "+" : "−") + fmt(x.amount), amountClass: x.dir === "got" ? "pos" : "",
   menu: [
     { icon: "edit", label: t("edit"), onSelect: () => openLoanSheet({ txn: rawTxn(x) }) },
     { icon: "trash", label: t("delete"), danger: true, onSelect: guard(() => deleteWithUndo("loanTxns", rawTxn(x), t("deletedLoanTxn"))) }
   ],
   onOpen: () => openLoanSheet({ txn: rawTxn(x) })
-});
+}); };
 
 // ----- Budgets -----
 function renderBudgets() {

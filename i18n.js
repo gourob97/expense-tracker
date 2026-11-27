@@ -93,7 +93,9 @@ export const STRINGS = {
     needName: "Enter who this is with.", personGone: "This person was deleted on another device. Nothing was saved.",
     rename: "Rename", renameTitle: "Rename person", nameExists: "“{name}” is already in your list.", renamed: "Renamed.",
     deletePerson: "Delete person", confirmDelPerson: "Delete {name} and their {n} entries? Their balance and history are removed.",
-    deletedPerson: "{name} deleted.", deletedLoanTxn: "Loan entry deleted."
+    deletedPerson: "{name} deleted.", deletedLoanTxn: "Loan entry deleted.",
+    dueBy: "Due by", clearDue: "Clear due date", dueOn: "Due {date}", dueToday: "Due today", overdueSince: "Overdue since {date}", overdue: "Overdue",
+    dueBeforeDate: "The due date can’t be before the loan date."
   },
   bn: {
     docTitle: "খরচের খাতা", appTitle: "খরচের খাতা", loading: "লোড হচ্ছে…",
@@ -188,7 +190,9 @@ export const STRINGS = {
     needName: "কার সাথে লেনদেন, নাম লিখুন।", personGone: "এই ব্যক্তিকে অন্য ডিভাইস থেকে মুছে ফেলা হয়েছে। কিছু সংরক্ষণ হয়নি।",
     rename: "নাম বদলান", renameTitle: "নাম বদলান", nameExists: "“{name}” তালিকায় আগে থেকেই আছে।", renamed: "নাম বদলানো হয়েছে।",
     deletePerson: "ব্যক্তিকে মুছুন", confirmDelPerson: "{name} ও তাঁর {n}টি এন্ট্রি মুছবেন? পাওনা-দেনা ও ইতিহাস মুছে যাবে।",
-    deletedPerson: "{name} মুছে ফেলা হয়েছে।", deletedLoanTxn: "এন্ট্রি মুছে ফেলা হয়েছে।"
+    deletedPerson: "{name} মুছে ফেলা হয়েছে।", deletedLoanTxn: "এন্ট্রি মুছে ফেলা হয়েছে।",
+    dueBy: "ফেরতের তারিখ", clearDue: "ফেরতের তারিখ মুছুন", dueOn: "ফেরত {date}", dueToday: "আজ ফেরতের দিন", overdueSince: "{date} থেকে বাকি", overdue: "সময় পেরিয়েছে",
+    dueBeforeDate: "ফেরতের তারিখ লেনদেনের তারিখের আগে হতে পারে না।"
   }
 };
 

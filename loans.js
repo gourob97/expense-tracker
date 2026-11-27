@@ -10,6 +10,9 @@
 export const DIRS = ["gave", "got"];
 const cents = n => Math.round(Number(n) * 100);
 
+// Optional due date on an entry: when the money it moved should come back ("YYYY-MM-DD")
+export const isValidDue = d => typeof d === "string" && /^\d{4}-\d{2}-\d{2}$/.test(d);
+
 export const isValidTxn = t =>
   !!t && DIRS.includes(t.dir) && typeof t.personId === "string" && Number.isFinite(Number(t.amount)) && Number(t.amount) > 0;
 
@@ -27,7 +30,37 @@ export const findPerson = (people, name) => {
 // Oldest first; same-day entries by creation time
 export const byDateAsc = (a, b) => (a.date || "").localeCompare(b.date || "") || (a.createdAt || 0) - (b.createdAt || 0);
 
-// One entry per person: { person, balance, count, last }. Transactions for unknown people
+// How much of each entry is still outstanding, in cents, by entry id. Repayments pay off the oldest open
+// entries first: a "got" eats into earlier "gave" entries and vice versa, and whatever is left over opens a new
+// one. So after Rahim borrows 500 on the 1st and 300 on the 5th and repays 600, only 200 of the 5th is open.
+// `sorted`: one person's valid entries, oldest first.
+function outstanding(sorted) {
+  const open = []; // oldest first, all in the same direction
+  const left = new Map();
+  for (const t of sorted) {
+    let c = cents(t.amount);
+    while (c > 0 && open.length && open[0].dir !== t.dir) {
+      const lot = open[0], take = Math.min(c, left.get(lot.id));
+      left.set(lot.id, left.get(lot.id) - take);
+      c -= take;
+      if (left.get(lot.id) === 0) open.shift();
+    }
+    left.set(t.id, c);
+    if (c > 0) open.push(t);
+  }
+  return left;
+}
+const sortedFor = (txns, personId) => txns.filter(t => t.personId === personId && isValidTxn(t)).sort(byDateAsc);
+
+// Earliest due date among a person's entries that aren't fully paid off ("" if none)
+function nextDueOf(sorted) {
+  const left = outstanding(sorted);
+  let next = "";
+  for (const t of sorted) if (left.get(t.id) > 0 && isValidDue(t.due) && (!next || t.due < next)) next = t.due;
+  return next;
+}
+
+// One entry per person: { person, balance, count, last, nextDue }. Transactions for unknown people
 // (e.g. deleted on another device while this one was offline) and malformed ones are ignored.
 export function balances(people, txns) {
   const acc = new Map(people.map(p => [p.id, { person: p, c: 0, count: 0, last: "" }]));
@@ -38,7 +71,9 @@ export function balances(people, txns) {
     e.count++;
     if ((t.date || "") > e.last) e.last = t.date;
   }
-  return [...acc.values()].map(({ person, c, count, last }) => ({ person, balance: c / 100, count, last }));
+  return [...acc.values()].map(({ person, c, count, last }) => ({
+    person, balance: c / 100, count, last, nextDue: c ? nextDueOf(sortedFor(txns, person.id)) : ""
+  }));
 }
 
 export function totals(entries) {
@@ -61,10 +96,11 @@ export function flowBetween(txns, start, end, isKnown = () => true) {
 }
 
 // One person's transactions, oldest first, each with the balance right after it (`after`)
+// and how much of it is still outstanding (`open`, see outstanding())
 export function history(txns, personId) {
   let c = 0;
-  return txns.filter(t => t.personId === personId && isValidTxn(t)).sort(byDateAsc)
-    .map(t => { c += effect(t); return { ...t, after: c / 100 }; });
+  const sorted = sortedFor(txns, personId), left = outstanding(sorted);
+  return sorted.map(t => { c += effect(t); return { ...t, after: c / 100, open: left.get(t.id) / 100 }; });
 }
 
 // Balance after applying a change: `without` is a transaction being edited (its old effect is taken out first)

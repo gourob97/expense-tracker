@@ -471,7 +471,10 @@ dialog.sheet::backdrop { background: rgba(0, 0, 0, .55) }
 .field-row { display: flex; align-items: center; gap: 12px; min-height: 52px; padding: 0 12px 0 16px }
 .field-row + .field-row { border-top: 1px solid var(--line) }
 .field-row[hidden] + .field-row { border-top: 0 }
-.field-row > span { flex: 0 0 auto; color: var(--muted); font-size: 15px }
+.field-row > span, .field-row > label { flex: 0 0 auto; color: var(--muted); font-size: 15px }
+.due-clear { flex: 0 0 auto; margin-right: -6px }
+.row-sub.overdue, .due-line.overdue { color: var(--danger) }
+.due-line { font-size: 13px; color: var(--muted); margin-top: 2px }
 .field-row input[type="text"], .field-row input[type="date"] { flex: 1; min-width: 0; border: 0; background: transparent; font-size: 15px; font-weight: 500; text-align: right; padding: 8px 0; outline: none }
 .field-row input[type="date"] { justify-content: flex-end }
 #eRepeatRow > span { flex: 1 }
