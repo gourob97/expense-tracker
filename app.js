@@ -28,6 +28,28 @@ const todayISO = () => isoOf(new Date());
 const parseISO = iso => { const [y, m, d] = iso.split("-").map(Number); return new Date(y, m - 1, d); };
 const sum = arr => arr.reduce((s, x) => s + Number(x.amount || 0), 0);
 
+// ----- Motion -----
+// CSS shortens every animation under prefers-reduced-motion; animations started from JS check this themselves
+const reducedMotion = matchMedia("(prefers-reduced-motion: reduce)");
+const EASE_OUT = "cubic-bezier(.2, .8, .2, 1)"; // same curve as --ease-out in styles.css
+// Exit animations are CSS keyframes under [data-leaving]. playExit sets the attribute and runs done() once they end
+// (at once if none run, e.g. the element isn't rendered). cancelExit removes it, which cancels the animation and
+// skips done(); it returns whether an exit was in progress.
+function playExit(el, done) {
+  if ("leaving" in el.dataset) return;
+  el.dataset.leaving = "";
+  Promise.allSettled(el.getAnimations().map(a => a.finished)).then(() => {
+    if (!("leaving" in el.dataset)) return;
+    delete el.dataset.leaving;
+    done();
+  });
+}
+function cancelExit(el) {
+  if (!("leaving" in el.dataset)) return false;
+  delete el.dataset.leaving;
+  return true;
+}
+
 // ----- Write tracking: each Firestore write promise settles only when the server acknowledges it,
 // so counting unsettled ones tells us whether this session has changes that haven't synced yet -----
 let pendingWrites = 0;
@@ -147,17 +169,40 @@ const parseNum = str => {
 
 // ----- Toast: confirmations auto-hide, errors stay until tapped, optional action (Undo) -----
 let toastTimer;
+function hideToast() {
+  const el = $("toast");
+  if (!el.hidden) playExit(el, () => { el.hidden = true; });
+}
 function toast(msg, { error = false, actionLabel, onAction } = {}) {
   const el = $("toast"), btn = $("toastAction");
   clearTimeout(toastTimer);
-  if (!msg) { el.hidden = true; return; }
+  if (!msg) { hideToast(); return; }
+  cancelExit(el); // a new message while the old one fades out takes over the visible toast
   $("toastMsg").textContent = msg;
   el.classList.toggle("error", error);
   btn.hidden = !actionLabel;
   if (actionLabel) { btn.textContent = actionLabel; btn.onclick = () => { toast(""); onAction(); }; }
   el.hidden = false;
-  if (!error) toastTimer = setTimeout(() => { el.hidden = true; }, actionLabel ? 6000 : 3500);
+  if (!error) toastTimer = setTimeout(hideToast, actionLabel ? 6000 : 3500);
 }
+
+// ----- Dialogs: open and close through these so closing plays the exit animation first -----
+function openDialog(d) {
+  if (cancelExit(d) || d.open) return; // reopened mid-exit: it never closed, so stopping the exit is enough
+  d.showModal();
+}
+function closeDialog(d, { instant = false } = {}) {
+  if (!d.open) return;
+  if (instant) { cancelExit(d); d.close(); return; }
+  playExit(d, () => d.close());
+}
+// Esc (and Android back) animate out too. If the browser won't allow the close to be deferred, it closes at once.
+// The confirm dialog handles cancel itself, since it has to resolve its promise.
+["entryDialog", "cycleDialog", "accountDialog"].forEach(id => $(id).addEventListener("cancel", e => {
+  if (!e.cancelable) return;
+  e.preventDefault();
+  closeDialog(e.currentTarget);
+}));
 $("toastMsg").onclick = () => toast("");
 const onErr = e => toast(e.message || String(e), { error: true });
 // Wrap async actions so errors show in the toast instead of failing silently
@@ -387,14 +432,14 @@ const isShown = el => el.getClientRects().length > 0;
 let panelAnchor = null;
 function openAccount(anchor) {
   const d = $("accountDialog");
-  if (d.open) { d.close(); return; }
+  if (d.open) { closeDialog(d); return; }
   closeMenu(false);
   renderAccount();
   d.querySelector(`input[name="themePref"][value="${themePref()}"]`).checked = true;
   d.querySelector(`input[name="langPref"][value="${lang}"]`).checked = true;
   panelAnchor = anchor;
   anchor.setAttribute("aria-expanded", "true");
-  d.showModal();
+  openDialog(d);
   placeAccount();
   d.querySelector('input[name="themePref"]:checked').focus({ preventScroll: true });
 }
@@ -421,11 +466,11 @@ $("accountDialog").addEventListener("close", () => {
   if (a && isShown(a) && (!document.activeElement || document.activeElement === document.body)) a.focus({ preventScroll: true });
 });
 // The panel's content fills the dialog, so a click whose target is the dialog itself landed on the backdrop
-$("accountDialog").addEventListener("click", e => { if (e.target === e.currentTarget) e.currentTarget.close(); });
+$("accountDialog").addEventListener("click", e => { if (e.target === e.currentTarget) closeDialog(e.currentTarget); });
 document.querySelectorAll("#accountDialog [data-icon]").forEach(el => el.replaceWith(svg(el.dataset.icon, 18)));
 document.querySelectorAll('input[name="themePref"]').forEach(r => r.addEventListener("change", () => setThemePref(r.value)));
 document.querySelectorAll('input[name="langPref"]').forEach(r => r.addEventListener("change", () => setLang(r.value)));
-$("acctCycle").onclick = () => { $("accountDialog").close(); openCycleDialog(); };
+$("acctCycle").onclick = () => { closeDialog($("accountDialog")); openCycleDialog(); };
 $("exportCsv").onclick = guard(() => exportData("csv"));
 $("exportJson").onclick = guard(() => exportData("json"));
 $("acctSignOut").onclick = guard(signOutSafely);
@@ -437,7 +482,7 @@ const delay = ms => new Promise(r => setTimeout(r, ms));
 // Signing out wipes the offline cache, which also holds writes the server hasn't received yet.
 // Give them a chance to flush; if they can't (offline, or the server is slow), ask before throwing them away.
 async function signOutSafely() {
-  $("accountDialog").close();
+  closeDialog($("accountDialog"));
   const flushed = waitForPendingWrites(db).then(() => true, () => true);
   let synced = await Promise.race([flushed, delay(400).then(() => false)]);
   if (!synced && navigator.onLine) {
@@ -516,12 +561,12 @@ function confirmAction(message, yesLabel) {
   $("confirmMsg").textContent = message;
   $("confirmYes").textContent = yesLabel;
   return new Promise(resolve => {
-    const done = v => { if (d.open) d.close(); resolve(v); };
+    const done = v => { closeDialog(d); resolve(v); };
     $("confirmYes").onclick = () => done(true);
     $("confirmNo").onclick = () => done(false);
     d.oncancel = e => { e.preventDefault(); done(false); };
     d.onclick = e => { if (e.target === d) done(false); };
-    d.showModal();
+    openDialog(d);
     $("confirmNo").focus();
   });
 }
@@ -535,17 +580,17 @@ function openCycleDialog() {
   const preview = () => { $("cyclePreview").textContent = t("cyclePreview", { range: periodLabel(periodOf(todayISO(), Number(sel.value)), Number(sel.value)) }); };
   sel.onchange = preview;
   preview();
-  $("cycleCancel").onclick = () => d.close();
-  d.onclick = e => { if (e.target === d) d.close(); };
+  $("cycleCancel").onclick = () => closeDialog(d);
+  d.onclick = e => { if (e.target === d) closeDialog(d); };
   $("cycleSave").onclick = guard(async () => {
     const day = normalizeStartDay(sel.value);
-    d.close();
+    closeDialog(d);
     if (day === startDay) return;
     applyStartDay(day); // optimistic; the snapshot listener confirms
     await setDoc(userDoc("settings", "preferences"), { cycleStartDay: day }, { merge: true });
     toast(t("cycleSaved", { day: fmtInt(day) }));
   });
-  d.showModal();
+  openDialog(d);
   sel.focus();
 }
 
@@ -643,7 +688,7 @@ function openSheet(kind, col, item) {
     $("eDay").replaceChildren(...Array.from({ length: 31 }, (_, i) => h("option", { value: i + 1, text: fmtInt(i + 1) })));
     $("eDay").value = String(item.day);
   }
-  $("entryDialog").showModal();
+  openDialog($("entryDialog"));
   $("eAmount").focus();
   if (item) $("eAmount").select();
 }
@@ -651,14 +696,14 @@ const openEntry = (kind = KIND_FOR_TAB[currentTab]) => openSheet(kind);
 const openEdit = (col, item) => openSheet(COL_KIND[col], col, item);
 $("fab").onclick = () => openEntry();
 $("addBtn").onclick = () => openEntry();
-$("entryCancel").onclick = () => $("entryDialog").close();
+$("entryCancel").onclick = () => closeDialog($("entryDialog"));
 // Clicking the dimmed backdrop closes the sheet
-$("entryDialog").addEventListener("click", e => { if (e.target === e.currentTarget) e.currentTarget.close(); });
+$("entryDialog").addEventListener("click", e => { if (e.target === e.currentTarget) closeDialog(e.currentTarget); });
 $("entryForm").addEventListener("submit", e => { e.preventDefault(); guard(submitEntry)(); });
 
 let submitting = false;
 async function submitEntry() {
-  if (submitting) return;
+  if (submitting || "leaving" in $("entryDialog").dataset) return; // Enter during the closing animation
   const amount = parseNum($("eAmount").value);
   if (!(amount > 0)) { toast(t("invalidAmount"), { error: true }); $("eAmount").focus(); return; }
   const editingRule = !!editing && isRuleCol(editing.col);
@@ -688,7 +733,7 @@ async function submitEntry() {
       await addDoc(userCol(isIncome ? "income" : "expenses"), data);
       msg = t(isIncome ? (repeat ? "incomeAddedRec" : "incomeAdded") : (repeat ? "expenseAddedRec" : "expenseAdded"));
     }
-    $("entryDialog").close();
+    closeDialog($("entryDialog"));
     setMonth(periodOf(date, startDay));
     toast(msg);
   } finally {
@@ -703,7 +748,7 @@ async function saveEdit({ amount, date, note, category }) {
   const changes = { amount, note };
   if (COL_KIND[col] !== "income") changes.category = category;
   if (rule) changes.day = Number($("eDay").value); else changes.date = date;
-  $("entryDialog").close();
+  closeDialog($("entryDialog"));
   if (Object.keys(changes).every(k => changes[k] === (item[k] ?? (k === "note" ? "" : undefined)))) return;
   const uid = user.uid, { id, ...before } = item;
   const ref = doc(db, "users", uid, col, id);
@@ -743,9 +788,8 @@ function init() {
     user = u;
     stopListeners();
     closeMenu(false);
-    if ($("entryDialog").open) $("entryDialog").close();
-    if ($("cycleDialog").open) $("cycleDialog").close();
-    if ($("accountDialog").open) $("accountDialog").close();
+    // The account changed under them, so they go at once rather than animating over the new state
+    ["entryDialog", "cycleDialog", "accountDialog"].forEach(id => closeDialog($(id), { instant: true }));
     if (u) {
       document.body.dataset.auth = "in";
       subscribeAll();
@@ -765,6 +809,7 @@ function init() {
 function stopListeners() {
   unsubs.forEach(f => f()); unsubs = [];
   monthUnsubs.forEach(f => f()); monthUnsubs = [];
+  monthPending = new Set(MONTH_COLS);
 }
 const mapDocs = s => s.docs.map(d => ({ id: d.id, ...d.data() }));
 
@@ -788,25 +833,73 @@ function subscribeAll() {
 // Listens to expenses, income and planned items for the selected period only
 function subscribeMonth() {
   monthUnsubs.forEach(f => f()); monthUnsubs = [];
+  monthPending = new Set(MONTH_COLS);
   const { start, end } = currentRange();
-  const monthQuery = name => query(userCol(name), where("date", ">=", start), where("date", "<=", end), orderBy("date", "desc"));
-  monthUnsubs.push(onSnapshot(monthQuery("expenses"), s => { expenses = sortDesc(mapDocs(s)); renderAll(); }, onErr));
-  monthUnsubs.push(onSnapshot(monthQuery("income"), s => { income = sortDesc(mapDocs(s)); renderAll(); }, onErr));
-  monthUnsubs.push(onSnapshot(monthQuery("planned"), s => { planned = mapDocs(s); renderAll(); }, onErr));
+  const listen = (name, assign) => onSnapshot(
+    query(userCol(name), where("date", ">=", start), where("date", "<=", end), orderBy("date", "desc")),
+    s => { assign(mapDocs(s)); monthPending.delete(name); renderAll(); },
+    e => { monthPending.delete(name); onErr(e); });
+  monthUnsubs.push(
+    listen("expenses", docs => { expenses = sortDesc(docs); }),
+    listen("income", docs => { income = sortDesc(docs); }),
+    listen("planned", docs => { planned = docs; }));
 }
 // Newest first; same-day entries by creation time
 const sortDesc = arr => arr.sort((a, b) => (b.date || "").localeCompare(a.date || "") || (b.createdAt || 0) - (a.createdAt || 0));
 const sortAsc = arr => [...arr].sort((a, b) => (a.date || "").localeCompare(b.date || "") || (a.createdAt || 0) - (b.createdAt || 0));
 
 // ===== Rendering =====
+// Month data is settled once all three month listeners have delivered. Changes animate only between two settled
+// renders, so loading and month switches show their numbers at once instead of counting up from zero.
+const MONTH_COLS = ["expenses", "income", "planned"];
+let monthPending = new Set(MONTH_COLS);
+let lastRenderSettled = false;
+
 function renderAll() {
-  renderSummary();
+  const settled = monthPending.size === 0;
+  const animate = settled && lastRenderSettled && !reducedMotion.matches && !document.hidden;
+  lastRenderSettled = settled;
+  renderSummary(animate);
   renderLists();
   renderBudgets();
   renderSide();
   renderChart();
   renderBadges();
   renderAccount();
+  animateBars(animate);
+}
+
+// ----- Animated amounts: a changed total counts from the value on screen to the new one -----
+const shownAmounts = new WeakMap(); // element → { value, raf }: value is what is displayed right now
+function setAmount(el, value, format, animate) {
+  const prev = shownAmounts.get(el);
+  if (prev) cancelAnimationFrame(prev.raf);
+  const from = prev?.value;
+  const state = { value };
+  shownAmounts.set(el, state);
+  if (!animate || from == null || from === value) { el.textContent = format(value); return; }
+  state.value = from;
+  const start = performance.now(), duration = 450;
+  const step = now => {
+    const p = Math.min(1, (now - start) / duration);
+    state.value = p < 1 ? from + (value - from) * (1 - (1 - p) ** 3) : value; // ease-out cubic
+    el.textContent = format(p < 1 ? Math.round(state.value) : value);
+    if (p < 1) state.raf = requestAnimationFrame(step);
+  };
+  state.raf = requestAnimationFrame(step);
+}
+
+// ----- Animated bars: they are rebuilt on every render, so each one's last width is kept by its data-bar key -----
+const barWidths = new Map();
+function animateBars(animate) {
+  const prev = new Map(barWidths); // read old widths from a copy: one key can appear twice (the phone insights clone)
+  document.querySelectorAll("[data-bar]").forEach(el => {
+    const key = el.dataset.bar, to = el.style.width;
+    if (!to) return;
+    const from = prev.get(key) || "0%";
+    barWidths.set(key, to);
+    if (animate && from !== to) el.animate([{ width: from }, { width: to }], { duration: 400, easing: EASE_OUT });
+  });
 }
 
 function spentByCategory() {
@@ -820,12 +913,12 @@ function budgetInfo(c, byCat) {
   return { c, b, s, ratio, over: b > 0 && s > b, near: b > 0 && s <= b && ratio >= NEAR_LIMIT };
 }
 
-function renderSummary() {
+function renderSummary(animate) {
   $("monthLabel").textContent = periodLabel(selectedMonth);
   const spent = sum(expenses), earned = sum(income), plannedTotal = sum(planned);
   const balance = earned - spent, left = balance - plannedTotal;
   $("leftLabel").textContent = t(left < 0 ? "overPlan" : "leftToSpend");
-  $("leftValue").textContent = fmt(Math.abs(left));
+  setAmount($("leftValue"), left, v => fmt(Math.abs(v)), animate);
   $("leftValue").classList.toggle("neg", left < 0);
   // How the big number is reached, read top to bottom: balance − planned (or income − spent when nothing is planned)
   const lines = plannedTotal
@@ -845,9 +938,9 @@ function renderSummary() {
     bar.hidden = false;
   } else bar.hidden = true;
 
-  $("incomeTotal").textContent = fmt(earned);
-  $("total").textContent = fmt(spent);
-  $("planned").textContent = fmt(plannedTotal);
+  setAmount($("incomeTotal"), earned, fmt, animate);
+  setAmount($("total"), spent, fmt, animate);
+  setAmount($("planned"), plannedTotal, fmt, animate);
   $("incomeSub").textContent = t("entries", { n: fmtInt(income.length) });
   $("spentSub").textContent = earned > 0
     ? t("kpiSpentSub", { pct: fmtInt(Math.round(spent / earned * 100)), n: fmtInt(expenses.length) })
@@ -1014,7 +1107,7 @@ function renderBudgets() {
     sumBox.replaceChildren(
       h("div", { class: "label", text: t("spentAgainst") }),
       h("div", { class: "bs-value" }, h("strong", { class: "num", text: fmt(totalS) }), h("span", { text: t("ofBudget", { budget: fmt(totalB) }) })),
-      h("span", { class: "track" }, h("span", { class: `fill ${totalS > totalB ? "over" : "accent"}`, style: `width:${Math.min(100, totalS / totalB * 100)}%` })),
+      h("span", { class: "track" }, h("span", { class: `fill ${totalS > totalB ? "over" : "accent"}`, "data-bar": "budget-total", style: `width:${Math.min(100, totalS / totalB * 100)}%` })),
       h("div", { class: "pills" },
         overN ? h("span", { class: "pill over" }, svg("alert", 14), t("overCount", { n: fmtInt(overN) })) : null,
         nearN ? h("span", { class: "pill near", text: t("nearCount", { n: fmtInt(nearN) }) }) : null,
@@ -1057,7 +1150,7 @@ function budgetReadRow(i) {
     h("span", { class: "brow-body" },
       h("span", { class: "brow-line" }, h("span", { class: "brow-name", text: name }),
         h("span", { class: "brow-amt num" }, fmt(i.s), h("span", { class: "of", text: " / " + fmt(i.b) }))),
-      h("span", { class: "track" }, h("span", { class: `fill ${state}`, style: `width:${Math.min(100, i.ratio * 100)}%` })),
+      h("span", { class: "track" }, h("span", { class: `fill ${state}`, "data-bar": "budget:" + i.c, style: `width:${Math.min(100, i.ratio * 100)}%` })),
       h("span", { class: `brow-status ${state}` }, i.over ? svg("alert", 14) : null, status)));
 }
 
@@ -1100,11 +1193,11 @@ function renderSide() {
   else {
     const top = entries.slice(0, 5), rest = entries.slice(5);
     const restSum = rest.reduce((s, [, v]) => s + v, 0);
-    const rows = top.map(([c, v]) => ({ name: catLabel(c), v, tone: catStyle(c).tone }));
-    if (rest.length) rows.push({ name: rest.length === 1 ? catLabel(rest[0][0]) : t("moreCats", { n: fmtInt(rest.length) }), v: restSum, tone: 7 });
+    const rows = top.map(([c, v]) => ({ key: c, name: catLabel(c), v, tone: catStyle(c).tone }));
+    if (rest.length) rows.push({ key: "\u0000rest", name: rest.length === 1 ? catLabel(rest[0][0]) : t("moreCats", { n: fmtInt(rest.length) }), v: restSum, tone: 7 });
     const pct = v => Math.round(v / total * 100);
     const bar = h("div", { class: "where-bar", role: "img", "aria-label": rows.map(r => `${r.name} ${fmtInt(pct(r.v))}%`).join(", ") },
-      rows.map(r => h("span", { class: `tone-${r.tone}`, style: `width:${r.v / total * 100}%` })));
+      rows.map(r => h("span", { class: `tone-${r.tone}`, "data-bar": "where:" + r.key, style: `width:${r.v / total * 100}%` })));
     const list = h("div", { class: "where-list" }, rows.map(r => h("div", { class: "where-row" },
       h("span", { class: `dot tone-${r.tone}` }), h("span", { class: "name", text: r.name }),
       h("span", { class: "pct", text: fmtInt(pct(r.v)) + "%" }), h("span", { class: "amt num", text: fmt(r.v) }))));
@@ -1121,7 +1214,7 @@ function renderSide() {
   $("watch").replaceChildren(...watch.map(i => h("div", { class: "watch-item" },
     h("div", { class: "brow-line" }, h("span", { class: "brow-name", text: catLabel(i.c) }),
       h("span", { class: "brow-amt num" }, fmt(i.s), h("span", { class: "of", text: " / " + fmt(i.b) }))),
-    h("span", { class: "track" }, h("span", { class: `fill ${i.over ? "over" : "near"}`, style: `width:${Math.min(100, i.ratio * 100)}%` })),
+    h("span", { class: "track" }, h("span", { class: `fill ${i.over ? "over" : "near"}`, "data-bar": "watch:" + i.c, style: `width:${Math.min(100, i.ratio * 100)}%` })),
     h("span", { class: `brow-status ${i.over ? "over" : "near"}` }, i.over ? svg("alert", 14) : null,
       i.over ? t("overBy", { amt: fmt(i.s - i.b) }) : i.s === i.b ? t("fullyUsed") : t("leftPct", { amt: fmt(i.b - i.s), pct: fmtInt(Math.round(i.ratio * 100)) })))));
 
