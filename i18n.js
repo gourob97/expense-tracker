@@ -63,7 +63,9 @@ export const STRINGS = {
     cycleMenu: "Month starts on day {day}", cycleTitle: "Month start day", cycleDay: "Starts on day",
     cycleCalendar: "{day} (calendar month)", cyclePreview: "Current period: {range}",
     cycleHint: "Pick the earliest day your salary can arrive. In shorter months, the last day is used. Past months are regrouped too; entries don’t change.",
-    cycleSaved: "Month now starts on day {day}.", save: "Save"
+    cycleSaved: "Month now starts on day {day}.", save: "Save",
+    editEntry: "Edit entry", editRecurring: "Edit recurring", saveChanges: "Save changes", dayOfMonthLabel: "Day of month",
+    entryUpdated: "Changes saved.", ruleUpdated: "Recurring rule updated. Entries already added stay."
   },
   bn: {
     docTitle: "খরচের খাতা", appTitle: "খরচের খাতা", loading: "লোড হচ্ছে…",
@@ -128,7 +130,9 @@ export const STRINGS = {
     cycleMenu: "মাস শুরু: {day} তারিখ", cycleTitle: "মাস শুরুর তারিখ", cycleDay: "শুরুর তারিখ",
     cycleCalendar: "{day} (ক্যালেন্ডার মাস)", cyclePreview: "চলতি সময়কাল: {range}",
     cycleHint: "বেতন সবচেয়ে আগে যে তারিখে আসতে পারে, সেটি বেছে নিন। ছোট মাসে শেষ দিনটি ধরা হবে। আগের মাসগুলোও নতুন করে ভাগ হবে; এন্ট্রি বদলাবে না।",
-    cycleSaved: "মাস এখন {day} তারিখ থেকে শুরু।", save: "সংরক্ষণ"
+    cycleSaved: "মাস এখন {day} তারিখ থেকে শুরু।", save: "সংরক্ষণ",
+    editEntry: "এন্ট্রি এডিট", editRecurring: "নিয়মিত এন্ট্রি এডিট", saveChanges: "পরিবর্তন সংরক্ষণ", dayOfMonthLabel: "মাসের তারিখ",
+    entryUpdated: "পরিবর্তন সংরক্ষণ হয়েছে।", ruleUpdated: "নিয়মিত এন্ট্রি আপডেট হয়েছে। আগে যোগ হওয়া এন্ট্রিগুলো বদলাবে না।"
   }
 };
 

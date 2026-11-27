@@ -215,6 +215,8 @@ body:not([data-auth="in"]) main { padding-bottom: 40px }
 .row-amt { font-size: 15px; font-weight: 600; white-space: nowrap }
 .row-amt.pos { color: var(--ok) }
 .row-menu { width: 40px; height: 44px }
+.row.tappable { cursor: pointer; -webkit-tap-highlight-color: transparent }
+.row.tappable:active { background: var(--surface-2) }
 .mark-btn { flex: 0 0 auto; height: 40px; min-width: 40px; padding: 0 10px; border-radius: 10px; border: 1px solid var(--line-2); background: transparent; color: var(--text); display: inline-flex; align-items: center; gap: 6px; font-size: 13px; font-weight: 500 }
 .mark-btn:hover { background: var(--surface-2) }
 .mark-btn .mark-label { display: none }
@@ -384,6 +386,7 @@ body:not([data-auth="in"]) .toast { bottom: 24px }
 @media (hover: hover) and (pointer: fine) {
   .row .row-menu { opacity: 0 }
   .row:hover .row-menu, .row-menu:focus-visible, .row-menu[aria-expanded="true"] { opacity: 1 }
+  .row.tappable:hover { background: var(--surface-2) }
 }
 
 /* ===== Tablet: 600px+ ===== */

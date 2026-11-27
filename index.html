@@ -244,7 +244,7 @@ try {
       <h2 id="entryTitle" data-i18n="newEntry">New entry</h2>
       <span></span>
     </div>
-    <div class="segmented" role="radiogroup" aria-label="Entry type" data-i18n-aria="entryType">
+    <div class="segmented" id="eKindSeg" role="radiogroup" aria-label="Entry type" data-i18n-aria="entryType">
       <label><input type="radio" name="kind" value="expense" checked><span data-i18n="kindExpense">Expense</span></label>
       <label><input type="radio" name="kind" value="income"><span data-i18n="kindIncome">Income</span></label>
       <label><input type="radio" name="kind" value="planned"><span data-i18n="kindPlanned">Planned</span></label>
@@ -258,7 +258,8 @@ try {
       <div class="cat-grid" id="eCatGrid"></div>
     </fieldset>
     <div class="field-group">
-      <label class="field-row"><span data-i18n="date">Date</span><input type="date" id="eDate" required></label>
+      <label class="field-row" id="eDateRow"><span data-i18n="date">Date</span><input type="date" id="eDate" required></label>
+      <label class="field-row" id="eDayRow" hidden><span data-i18n="dayOfMonthLabel">Day of month</span><select id="eDay"></select></label>
       <label class="field-row"><span data-i18n="note">Note</span><input type="text" id="eNote" maxlength="80" autocomplete="off"></label>
       <label class="field-row" id="eRepeatRow"><span data-i18n="repeatMonthly">Repeat every month</span><input type="checkbox" role="switch" id="eRepeat" class="switch"></label>
     </div>

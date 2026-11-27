@@ -2,7 +2,7 @@ import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.2/fireba
 import { getAuth, GoogleAuthProvider, signInWithPopup, signOut, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js";
 import {
   initializeFirestore, getFirestore, persistentLocalCache, persistentMultipleTabManager, terminate, clearIndexedDbPersistence,
-  collection, doc, addDoc, deleteDoc, setDoc, onSnapshot, query, where, orderBy
+  collection, doc, addDoc, deleteDoc, setDoc, updateDoc, onSnapshot, query, where, orderBy
 } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
 import { STRINGS, CAT_BN } from "./i18n.js";
 import { periodRange, periodOf, shiftPeriod, dateInPeriod, addDays, daysBetween, inPeriod, isPeriodKey, normalizeStartDay, DEFAULT_START_DAY } from "./period.js";
@@ -50,6 +50,7 @@ const ICONS = {
   globe: '<circle cx="12" cy="12" r="9"/><path d="M3 12h18"/><path d="M12 3c2.5 2.7 3.8 5.7 3.8 9s-1.3 6.3-3.8 9c-2.5-2.7-3.8-5.7-3.8-9S9.5 5.7 12 3z"/>',
   logout: '<path d="M15 4h4v16h-4"/><path d="M10 8l-4 4 4 4"/><path d="M6 12h10"/>',
   plus: '<path d="M12 5v14"/><path d="M5 12h14"/>',
+  edit: '<path d="M4 20h4L19 9l-4-4L4 16z"/><path d="M14 6l4 4"/>',
   calendar: '<rect x="3" y="5" width="18" height="16" rx="2"/><path d="M3 10h18"/><path d="M8 3v4"/><path d="M16 3v4"/>'
 };
 function svg(name, size = 20) {
@@ -210,8 +211,15 @@ matchMedia("(prefers-color-scheme: light)").addEventListener?.("change", e => {
 const CYCLE_KEY = "cycleStartDay";
 const cachedStartDay = () => { try { return normalizeStartDay(localStorage.getItem(CYCLE_KEY)); } catch (e) { return DEFAULT_START_DAY; } };
 let startDay = cachedStartDay();
-// Key of the period being viewed: "YYYY-MM" of the month it starts in (see period.js)
-let selectedMonth = periodOf(todayISO(), startDay);
+// Key of the period being viewed: "YYYY-MM" of the month it starts in (see period.js).
+// Lives in the URL hash (#/tab?m=YYYY-MM) so reload and back/forward keep it; omitted for the current period.
+const nowPeriod = () => periodOf(todayISO(), startDay);
+function readHash() {
+  const [tab, qs = ""] = location.hash.replace(/^#\/?/, "").split("?");
+  const m = new URLSearchParams(qs).get("m");
+  return { tab, month: m && isPeriodKey(m) ? m : null };
+}
+let selectedMonth = readHash().month || nowPeriod();
 const currentRange = () => periodRange(selectedMonth, startDay);
 let user = null;
 let categories = [...DEFAULT_CATEGORIES];
@@ -223,7 +231,15 @@ const userDoc = (...path) => doc(db, "users", user.uid, ...path);
 const userCol = name => collection(db, "users", user.uid, name);
 
 // ----- Tabs (state lives in the URL hash as #/name so reload and back/forward work) -----
-const tabFromHash = () => location.hash.replace(/^#\/?/, "");
+const tabFromHash = () => readHash().tab;
+const hashFor = (tab, month) => `#/${tab}` + (month !== nowPeriod() ? `?m=${month}` : "");
+// Writes tab + month to the URL. push=true adds a history entry (back returns to the previous month).
+function syncHash(push) {
+  document.querySelectorAll('a[href^="#/"]').forEach(a => { a.href = hashFor(a.getAttribute("href").replace(/^#\/?/, "").split("?")[0], selectedMonth); });
+  const target = hashFor(currentTab, selectedMonth);
+  if (location.hash === target) return;
+  if (push) location.hash = target; else history.replaceState(history.state, "", target);
+}
 const KIND_FOR_TAB = { expenses: "expense", income: "income", planned: "planned", budgets: "expense" };
 const ADD_LABEL = { expense: "addExpense", income: "addIncome", planned: "addPlanned" };
 const TAB_TITLE = { expenses: "tabExpenses", income: "tabIncome", planned: "tabPlanned", budgets: "tabBudgets" };
@@ -240,16 +256,20 @@ function showTab(name) {
   return name;
 }
 window.addEventListener("hashchange", () => {
-  showTab(tabFromHash());
-  if (window.scrollY > 0) window.scrollTo({ top: 0 });
+  const { tab, month } = readHash(), prevTab = currentTab;
+  showTab(tab);
+  setMonth(month || nowPeriod(), { fromHash: true });
+  syncHash(false); // normalise unknown tabs / stale params
+  if (currentTab !== prevTab && window.scrollY > 0) window.scrollTo({ top: 0 });
 });
 
 // ----- Month switching -----
-function setMonth(ym) {
+function setMonth(ym, { fromHash = false } = {}) {
   if (!isPeriodKey(ym) || ym === selectedMonth) return;
   selectedMonth = ym;
   $("month").value = ym;
   filterCat = null;
+  if (!fromHash) syncHash(true);
   renderAll();
   if (user) subscribeMonth();
 }
@@ -267,6 +287,7 @@ function applyStartDay(next) {
   selectedMonth = periodOf(anchor, startDay);
   $("month").value = selectedMonth;
   filterCat = null;
+  syncHash(false);
   renderAll();
   if (user) subscribeMonth();
 }
@@ -374,23 +395,29 @@ function initInAppNotice() {
   }
 }
 
-// ===== Entry sheet (expense / income / planned) =====
+// ===== Entry sheet (expense / income / planned; add or edit) =====
 let entryKind = "expense";
+// Set while the sheet edits an existing item: { col, item }. Null when adding.
+let editing = null;
+const COL_KIND = { expenses: "expense", income: "income", planned: "planned", recurring: "expense", recurringIncome: "income" };
+const isRuleCol = col => col === "recurring" || col === "recurringIncome";
 function setKind(kind) {
   entryKind = kind;
   const radio = document.querySelector(`input[name="kind"][value="${kind}"]`);
   if (radio) radio.checked = true;
   $("eCatField").hidden = kind === "income";
-  $("eRepeatRow").hidden = kind === "planned";
+  $("eRepeatRow").hidden = kind === "planned" || !!editing;
   $("eNote").placeholder = t(kind === "income" ? "phSource" : kind === "planned" ? "phWhat" : "phNote");
-  $("entrySubmit").textContent = t(ADD_LABEL[kind]);
+  $("entrySubmit").textContent = t(editing ? "saveChanges" : ADD_LABEL[kind]);
 }
 document.querySelectorAll('input[name="kind"]').forEach(r => { r.onchange = () => setKind(r.value); });
 
-function buildCatGrid() {
+// `select` pre-selects a category; one since removed from the list is still offered so editing can keep it
+function buildCatGrid(select) {
   const grid = $("eCatGrid");
-  const prev = grid.querySelector("input:checked")?.value;
-  grid.replaceChildren(...categories.map((c, i) => {
+  const prev = select || grid.querySelector("input:checked")?.value;
+  const list = select && !categories.includes(select) ? [...categories, select] : categories;
+  grid.replaceChildren(...list.map((c, i) => {
     const s = catStyle(c);
     return h("label", { class: "cat-opt" },
       h("input", { type: "radio", name: "cat", value: c, checked: (prev ? prev === c : i === 0) || null }),
@@ -401,18 +428,32 @@ function buildCatGrid() {
 // Default date: today when viewing the current period, otherwise the first day of the viewed period
 const defaultDate = () => { const r = currentRange(), today = todayISO(); return inPeriod(today, r) ? today : r.start; };
 
-function openEntry(kind = KIND_FOR_TAB[currentTab]) {
+function openSheet(kind, col, item) {
   if (!user) return;
+  editing = item ? { col, item } : null;
+  const rule = !!item && isRuleCol(col);
   closeMenu(false);
-  buildCatGrid();
+  buildCatGrid(item?.category);
+  $("eKindSeg").hidden = !!item; // moving an item between expenses/income/planned isn't an edit
+  $("eDateRow").hidden = rule;
+  $("eDate").required = !rule;
+  $("eDayRow").hidden = !rule;
   setKind(kind);
-  $("eAmount").value = "";
-  $("eNote").value = "";
+  $("entryTitle").textContent = t(!item ? "newEntry" : rule ? "editRecurring" : "editEntry");
+  $("eAmount").value = item ? plainFmt.format(item.amount) : "";
+  $("eNote").value = item?.note || "";
   $("eRepeat").checked = false;
-  $("eDate").value = defaultDate();
+  $("eDate").value = item && !rule ? item.date : defaultDate();
+  if (rule) {
+    $("eDay").replaceChildren(...Array.from({ length: 31 }, (_, i) => h("option", { value: i + 1, text: fmtInt(i + 1) })));
+    $("eDay").value = String(item.day);
+  }
   $("entryDialog").showModal();
   $("eAmount").focus();
+  if (item) $("eAmount").select();
 }
+const openEntry = (kind = KIND_FOR_TAB[currentTab]) => openSheet(kind);
+const openEdit = (col, item) => openSheet(COL_KIND[col], col, item);
 $("fab").onclick = () => openEntry();
 $("addBtn").onclick = () => openEntry();
 $("entryCancel").onclick = () => $("entryDialog").close();
@@ -425,13 +466,15 @@ async function submitEntry() {
   if (submitting) return;
   const amount = parseNum($("eAmount").value);
   if (!(amount > 0)) { toast(t("invalidAmount"), { error: true }); $("eAmount").focus(); return; }
+  const editingRule = !!editing && isRuleCol(editing.col);
   const date = $("eDate").value;
-  if (!date) { $("eDate").focus(); return; }
+  if (!date && !editingRule) { $("eDate").focus(); return; }
   const note = $("eNote").value.trim();
   const category = $("eCatGrid").querySelector("input:checked")?.value || categories[0];
-  const repeat = entryKind !== "planned" && $("eRepeat").checked;
+  const repeat = !editing && entryKind !== "planned" && $("eRepeat").checked;
   submitting = true; $("entrySubmit").disabled = true;
   try {
+    if (editing) { await saveEdit({ amount, date, note, category }); return; }
     let msg;
     if (entryKind === "planned") {
       await addDoc(userCol("planned"), { amount, category, date, note, createdAt: Date.now() });
@@ -458,6 +501,25 @@ async function submitEntry() {
   }
 }
 
+// Updates the item being edited; only the fields the sheet shows are touched (createdAt, recurringId stay)
+async function saveEdit({ amount, date, note, category }) {
+  const { col, item } = editing;
+  const rule = isRuleCol(col);
+  const changes = { amount, note };
+  if (COL_KIND[col] !== "income") changes.category = category;
+  if (rule) changes.day = Number($("eDay").value); else changes.date = date;
+  $("entryDialog").close();
+  if (Object.keys(changes).every(k => changes[k] === (item[k] ?? (k === "note" ? "" : undefined)))) return;
+  const uid = user.uid, { id, ...before } = item;
+  const ref = doc(db, "users", uid, col, id);
+  await updateDoc(ref, changes);
+  if (!rule) setMonth(periodOf(date, startDay));
+  toast(t(rule ? "ruleUpdated" : "entryUpdated"), { actionLabel: t("undo"), onAction: guard(async () => {
+    await setDoc(ref, before);
+    toast(t("restored"));
+  }) });
+}
+
 // Keyboard: N = new entry, / = search (desktop). Ignored while typing or when a dialog is open.
 document.addEventListener("keydown", e => {
   if (!user || e.metaKey || e.ctrlKey || e.altKey || document.querySelector("dialog[open]")) return;
@@ -480,6 +542,7 @@ function init() {
   $("signInBtn").onclick = guard(() => signInWithPopup(auth, new GoogleAuthProvider()));
   $("editBudgets").onclick = () => { editingBudgets = !editingBudgets; budgetEditKey = ""; renderBudgets(); };
   showTab(tabFromHash());
+  syncHash(false);
 
   onAuthStateChanged(auth, u => {
     user = u;
@@ -628,8 +691,9 @@ function renderFlat(boxId, items, rowFn, emptyMsg) {
   box.replaceChildren(...(items.length ? items.map(rowFn) : [emptyState({ msg: emptyMsg })]));
 }
 
-function entryRow({ icon, title, sub, amount, amountClass = "", menu, extra }) {
-  return h("div", { class: "row" },
+// onOpen: tapping the row (outside its buttons) opens the editor; the ⋯ menu's Edit does the same for keyboard users
+function entryRow({ icon, title, sub, amount, amountClass = "", menu, extra, onOpen }) {
+  return h("div", { class: onOpen ? "row tappable" : "row", onclick: onOpen ? e => { if (!e.target.closest("button")) onOpen(); } : null },
     icon,
     h("div", { class: "row-info" }, h("div", { class: "row-title", text: title }), sub ? h("div", { class: "row-sub", text: sub }) : null),
     h("span", { class: `row-amt num ${amountClass}`, text: amount }),
@@ -637,7 +701,8 @@ function entryRow({ icon, title, sub, amount, amountClass = "", menu, extra }) {
     menu ? h("button", { type: "button", class: "icon-btn row-menu", "aria-haspopup": "menu", "aria-expanded": "false",
       "aria-label": t("moreActions", { name: title }), onclick: e => openMenu(e.currentTarget, menu) }, svg("more", 20)) : null);
 }
-const deleteItem = (col, item, msgKey) => [{ icon: "trash", label: t("delete"), danger: true, onSelect: guard(() => deleteWithUndo(col, item, t(msgKey))) }];
+const editItem = (col, item) => ({ icon: "edit", label: t("edit"), onSelect: () => openEdit(col, item) });
+const deleteItem = (col, item, msgKey) => [editItem(col, item), { icon: "trash", label: t("delete"), danger: true, onSelect: guard(() => deleteWithUndo(col, item, t(msgKey))) }];
 const incomeIcon = () => h("span", { class: "cat-icon tone-5" }, svg("income"));
 
 const expenseRow = e => entryRow({
@@ -645,14 +710,14 @@ const expenseRow = e => entryRow({
   title: e.note || catLabel(e.category),
   sub: [e.note ? catLabel(e.category) : null, e.recurringId ? t("monthly") : null].filter(Boolean).join(" · "),
   amount: fmt(e.amount),
-  menu: deleteItem("expenses", e, "deletedExpense")
+  menu: deleteItem("expenses", e, "deletedExpense"), onOpen: () => openEdit("expenses", e)
 });
 const incomeRow = i => entryRow({
   icon: incomeIcon(),
   title: i.note || t("income"),
   sub: i.recurringId ? t("monthly") : "",
   amount: "+" + fmt(i.amount), amountClass: "pos",
-  menu: deleteItem("income", i, "deletedIncome")
+  menu: deleteItem("income", i, "deletedIncome"), onOpen: () => openEdit("income", i)
 });
 const plannedRow = p => entryRow({
   icon: catIcon(p.category),
@@ -661,14 +726,15 @@ const plannedRow = p => entryRow({
   amount: fmt(p.amount),
   extra: h("button", { type: "button", class: "mark-btn", "aria-label": `${t("markSpent")}: ${p.note || catLabel(p.category)}`,
     onclick: guard(() => markSpent(p)) }, svg("check", 18), h("span", { class: "mark-label", text: t("markSpent") })),
-  menu: deleteItem("planned", p, "deletedPlanned")
+  menu: deleteItem("planned", p, "deletedPlanned"), onOpen: () => openEdit("planned", p)
 });
 const ruleRow = (r, isIncome) => entryRow({
   icon: isIncome ? incomeIcon() : catIcon(r.category),
   title: r.note || (isIncome ? t("income") : catLabel(r.category)),
   sub: [isIncome ? null : catLabel(r.category), t("dayOfMonth", { day: fmtInt(r.day) })].filter(Boolean).join(" · "),
   amount: (isIncome ? "+" : "") + fmt(r.amount), amountClass: isIncome ? "pos" : "",
-  menu: [{ icon: "trash", label: t("delete"), danger: true, onSelect: guard(async () => {
+  onOpen: () => openEdit(isIncome ? "recurringIncome" : "recurring", r),
+  menu: [editItem(isIncome ? "recurringIncome" : "recurring", r), { icon: "trash", label: t("delete"), danger: true, onSelect: guard(async () => {
     if (await confirmAction(t(isIncome ? "confirmDelRecInc" : "confirmDelRec"), t("delete"))) await deleteWithUndo(isIncome ? "recurringIncome" : "recurring", r, t("deletedRec"));
   }) }]
 });
