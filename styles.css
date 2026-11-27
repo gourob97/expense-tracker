@@ -113,7 +113,7 @@ body:not([data-auth="loading"]) .when-loading, body:not([data-auth="setup"]) .wh
 /* ===== Shell / top bar (phone first) ===== */
 .topbar {
   display: flex; align-items: center; justify-content: space-between; gap: 12px;
-  padding: max(10px, env(safe-area-inset-top)) max(10px, env(safe-area-inset-right)) 4px max(6px, env(safe-area-inset-left));
+  padding: max(10px, env(safe-area-inset-top)) max(10px, env(safe-area-inset-right)) 4px max(16px, env(safe-area-inset-left));
 }
 .top-left, .top-right { display: flex; align-items: center; gap: 12px; min-width: 0 }
 .brand { display: none; align-items: center; gap: 10px; min-width: 0 }
@@ -121,9 +121,20 @@ body:not([data-auth="loading"]) .when-loading, body:not([data-auth="setup"]) .wh
 .logo { width: 32px; height: 32px; border-radius: 9px; background: var(--accent); color: var(--accent-ink); display: inline-flex; align-items: center; justify-content: center; flex: 0 0 auto }
 .logo.big { width: 56px; height: 56px; border-radius: 16px }
 .page-title { display: none; font-size: 28px; font-weight: 700; letter-spacing: -.03em }
-.month-switch { display: flex; align-items: center; min-width: 0 }
-.month-btn { min-height: 44px; min-width: 0; padding: 0 4px; border: 0; background: transparent; font-size: 17px; font-weight: 600; letter-spacing: -.01em; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; border-radius: 10px }
+/* Month switcher: one pill with the arrows inside; the label is the month in bold and the year muted */
+.month-switch { display: flex; align-items: center; min-width: 0; padding: 2px; background: var(--surface); border: 1px solid var(--line); border-radius: 14px }
+.month-switch .icon-btn { width: 38px; height: 40px; border-radius: 11px; color: var(--muted) }
+.month-switch .icon-btn:hover { color: var(--text) }
+.month-btn {
+  display: inline-flex; align-items: center; justify-content: center; gap: 6px; min-height: 40px; min-width: 150px; padding: 0 8px;
+  border: 0; background: transparent; color: var(--text); border-radius: 11px; white-space: nowrap; overflow: hidden
+}
 .month-btn:hover { background: var(--surface-2) }
+.month-label { display: inline-flex; align-items: baseline; gap: 5px; min-width: 0; overflow: hidden; text-overflow: ellipsis }
+.ml-main { font-size: 16px; font-weight: 700; letter-spacing: -.015em }
+.ml-sub { font-size: 15px; font-weight: 500; color: var(--muted); font-variant-numeric: tabular-nums }
+.month-caret { flex: 0 0 auto; color: var(--muted); margin-top: 1px }
+:root[lang="bn"] .ml-main { letter-spacing: 0 }
 .search { display: none }
 .add-btn { display: none }
 .account-btn { border: 0; background: transparent; padding: 0; display: inline-flex; align-items: center; color: var(--text) }
@@ -556,9 +567,6 @@ body:not([data-auth="in"]) .toast { bottom: 24px }
   :root { --nav-h: 0px }
   .topbar { padding: max(24px, env(safe-area-inset-top)) 28px 12px 32px }
   .topbar .brand { display: flex }
-  .month-switch { background: var(--surface); border: 1px solid var(--line); border-radius: 14px }
-  .month-btn { font-size: 15px; min-width: 132px; padding: 0 6px }
-  .month-switch .icon-btn { border-radius: 13px }
   .add-btn { display: inline-flex }
   .account-btn.top .avatar { width: 36px; height: 36px }
   /* Popover: left/top are set from the anchor in app.js */
@@ -619,8 +627,8 @@ body:not([data-auth="in"]) .toast { bottom: 24px }
   body[data-auth="in"] .topbar .brand, body[data-auth="in"] .topbar .account-btn { display: none }
   .page-title { display: block }
   .top-left { gap: 16px }
-  .month-switch .icon-btn { width: 40px; height: 40px }
-  .month-btn { min-height: 40px; font-size: 14px; min-width: 124px }
+  .ml-main { font-size: 15px }
+  .ml-sub { font-size: 14px }
   .search { display: flex; align-items: center; gap: 8px; height: 40px; width: 280px; padding: 0 12px; background: var(--surface); border: 1px solid var(--line); border-radius: 12px; color: var(--muted) }
   .search:focus-within { border-color: var(--accent) }
   .search input { flex: 1; min-width: 0; border: 0; background: transparent; color: var(--text); font-size: 14px; outline: none; padding: 0 }
