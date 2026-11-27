@@ -53,8 +53,9 @@ try {
         <span id="addBtnLabel">Add expense</span>
         <kbd aria-hidden="true">N</kbd>
       </button>
-      <button type="button" class="account-btn top" id="accountBtn" aria-haspopup="menu" data-i18n-aria="accountMenu" aria-label="Account, theme and language">
-        <span class="avatar"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="8" r="4"/><path d="M4 21c0-4 4-6 8-6s8 2 8 6"/></svg></span>
+      <button type="button" class="account-btn top" id="accountBtn" aria-haspopup="dialog" aria-expanded="false" aria-controls="accountDialog" aria-label="Account, theme and language">
+        <span class="avatar" data-avatar></span>
+        <span class="sync-badge" aria-hidden="true"></span>
       </button>
     </div>
   </header>
@@ -85,13 +86,13 @@ try {
         <span class="nav-label" data-i18n="tabBudgets">Budgets</span>
       </a>
     </div>
-    <button type="button" class="account-btn side" id="accountBtnSide" aria-haspopup="menu">
-      <span class="avatar"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="8" r="4"/><path d="M4 21c0-4 4-6 8-6s8 2 8 6"/></svg></span>
+    <button type="button" class="account-btn side" id="accountBtnSide" aria-haspopup="dialog" aria-expanded="false" aria-controls="accountDialog">
+      <span class="avatar" data-avatar></span>
       <span class="account-text">
-        <span class="account-name" data-i18n="account">Account</span>
-        <span class="account-sub"><span class="sync-dot" aria-hidden="true"></span><span data-i18n="synced">Synced with Google</span></span>
+        <span class="account-name" data-account-name>Account</span>
+        <span class="account-sub"><span class="sync-dot" aria-hidden="true"></span><span class="sync-text"></span></span>
       </span>
-      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M8 9l4-4 4 4"/><path d="M8 15l4 4 4-4"/></svg>
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 15l6-6 6 6"/></svg>
     </button>
   </nav>
 
@@ -308,6 +309,54 @@ try {
   <div class="btn-row end">
     <button type="button" class="btn secondary" id="cycleCancel" data-i18n="cancel">Cancel</button>
     <button type="button" class="btn primary" id="cycleSave" data-i18n="save">Save</button>
+  </div>
+</dialog>
+
+<dialog id="accountDialog" class="account-panel" aria-labelledby="acctName">
+  <div class="acct-inner">
+    <div class="grabber" aria-hidden="true"></div>
+    <div class="acct-head when-in">
+      <span class="avatar lg" data-avatar></span>
+      <div class="acct-id">
+        <h2 class="acct-name" id="acctName" data-account-name>Account</h2>
+        <p class="acct-email" id="acctEmail"></p>
+        <p class="acct-sync"><span class="sync-dot" aria-hidden="true"></span><span class="sync-text"></span></p>
+      </div>
+    </div>
+    <div class="acct-section">
+      <div class="acct-row">
+        <span class="acct-label" id="themeLabel"><span data-icon="sun"></span><span data-i18n="theme">Theme</span></span>
+        <div class="segmented compact" role="radiogroup" aria-labelledby="themeLabel">
+          <label><input type="radio" name="themePref" value="system"><span data-i18n="themeSystem">System</span></label>
+          <label><input type="radio" name="themePref" value="light"><span data-i18n="themeLight">Light</span></label>
+          <label><input type="radio" name="themePref" value="dark"><span data-i18n="themeDark">Dark</span></label>
+        </div>
+      </div>
+      <div class="acct-row">
+        <span class="acct-label" id="langLabel"><span data-icon="globe"></span><span data-i18n="language">Language</span></span>
+        <div class="segmented compact two" role="radiogroup" aria-labelledby="langLabel">
+          <label><input type="radio" name="langPref" value="en"><span lang="en">English</span></label>
+          <label><input type="radio" name="langPref" value="bn"><span lang="bn">বাংলা</span></label>
+        </div>
+      </div>
+      <button type="button" class="acct-row acct-btn when-in" id="acctCycle">
+        <span class="acct-label"><span data-icon="calendar"></span><span data-i18n="cycleRow">Month starts on</span></span>
+        <span class="acct-value" id="acctCycleVal"></span>
+        <span data-icon="chevron" class="acct-chev"></span>
+      </button>
+      <div class="acct-row when-in">
+        <span class="acct-label" id="exportLabel"><span data-icon="download"></span><span data-i18n="exportData">Export data</span></span>
+        <div class="btn-row" role="group" aria-labelledby="exportLabel">
+          <button type="button" class="btn small secondary" id="exportCsv" data-i18n-aria="exportCsv" aria-label="Export entries as CSV">CSV</button>
+          <button type="button" class="btn small secondary" id="exportJson" data-i18n-aria="exportJson" aria-label="Download full backup as JSON">JSON</button>
+        </div>
+      </div>
+    </div>
+    <div class="acct-section when-in">
+      <button type="button" class="acct-row acct-btn danger" id="acctSignOut">
+        <span class="acct-label"><span data-icon="logout"></span><span data-i18n="signOut">Sign out</span></span>
+      </button>
+    </div>
   </div>
 </dialog>
 

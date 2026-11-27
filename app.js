@@ -2,7 +2,8 @@ import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.2/fireba
 import { getAuth, GoogleAuthProvider, signInWithPopup, signOut, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js";
 import {
   initializeFirestore, getFirestore, persistentLocalCache, persistentMultipleTabManager, terminate, clearIndexedDbPersistence,
-  collection, doc, addDoc, deleteDoc, setDoc, updateDoc, onSnapshot, query, where, orderBy
+  collection, doc, onSnapshot, query, where, orderBy, getDoc, getDocs, waitForPendingWrites,
+  addDoc as fsAddDoc, deleteDoc as fsDeleteDoc, setDoc as fsSetDoc, updateDoc as fsUpdateDoc
 } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
 import { STRINGS, CAT_BN } from "./i18n.js";
 import { periodRange, periodOf, shiftPeriod, dateInPeriod, addDays, daysBetween, inPeriod, isPeriodKey, normalizeStartDay, DEFAULT_START_DAY } from "./period.js";
@@ -26,6 +27,17 @@ const isoOf = d => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate(
 const todayISO = () => isoOf(new Date());
 const parseISO = iso => { const [y, m, d] = iso.split("-").map(Number); return new Date(y, m - 1, d); };
 const sum = arr => arr.reduce((s, x) => s + Number(x.amount || 0), 0);
+
+// ----- Write tracking: each Firestore write promise settles only when the server acknowledges it,
+// so counting unsettled ones tells us whether this session has changes that haven't synced yet -----
+let pendingWrites = 0;
+const tracked = fn => (...args) => {
+  const p = fn(...args);
+  pendingWrites++; updateSync();
+  p.finally(() => { pendingWrites--; updateSync(); }).catch(() => {});
+  return p;
+};
+const addDoc = tracked(fsAddDoc), setDoc = tracked(fsSetDoc), updateDoc = tracked(fsUpdateDoc), deleteDoc = tracked(fsDeleteDoc);
 
 // ----- Icons (static, trusted markup) -----
 const ICONS = {
@@ -51,7 +63,10 @@ const ICONS = {
   logout: '<path d="M15 4h4v16h-4"/><path d="M10 8l-4 4 4 4"/><path d="M6 12h10"/>',
   plus: '<path d="M12 5v14"/><path d="M5 12h14"/>',
   edit: '<path d="M4 20h4L19 9l-4-4L4 16z"/><path d="M14 6l4 4"/>',
-  calendar: '<rect x="3" y="5" width="18" height="16" rx="2"/><path d="M3 10h18"/><path d="M8 3v4"/><path d="M16 3v4"/>'
+  calendar: '<rect x="3" y="5" width="18" height="16" rx="2"/><path d="M3 10h18"/><path d="M8 3v4"/><path d="M16 3v4"/>',
+  user: '<circle cx="12" cy="8" r="4"/><path d="M4 21c0-4 4-6 8-6s8 2 8 6"/>',
+  download: '<path d="M12 4v11"/><path d="M7 10l5 5 5-5"/><path d="M5 20h14"/>',
+  chevron: '<path d="M9 6l6 6-6 6"/>'
 };
 function svg(name, size = 20) {
   const tpl = document.createElement("template");
@@ -148,16 +163,15 @@ const onErr = e => toast(e.message || String(e), { error: true });
 // Wrap async actions so errors show in the toast instead of failing silently
 const guard = fn => async (...args) => { try { await fn(...args); } catch (e) { onErr(e); } };
 
-// ----- Popover menu (row actions, account) -----
+// ----- Popover menu (row actions) -----
 let menuAnchor = null;
 function openMenu(anchor, items) {
   const m = $("menu");
   if (menuAnchor === anchor && !m.hidden) { closeMenu(true); return; }
   closeMenu(false);
-  m.replaceChildren(...items.map(it => it.header != null
-    ? h("div", { class: "menu-header", text: it.header })
-    : h("button", { type: "button", role: "menuitem", class: "menu-item" + (it.danger ? " danger" : ""), lang: it.lang,
-        onclick: () => { closeMenu(true); it.onSelect(); } }, it.icon ? svg(it.icon, 18) : null, h("span", { text: it.label }))));
+  m.replaceChildren(...items.map(it =>
+    h("button", { type: "button", role: "menuitem", class: "menu-item" + (it.danger ? " danger" : ""),
+      onclick: () => { closeMenu(true); it.onSelect(); } }, it.icon ? svg(it.icon, 18) : null, h("span", { text: it.label }))));
   m.hidden = false;
   menuAnchor = anchor;
   anchor.setAttribute("aria-expanded", "true");
@@ -190,20 +204,22 @@ $("menu").addEventListener("keydown", e => {
   else if (e.key === "Tab") closeMenu(false);
 });
 
-// ----- Theme (system default; a manual choice is remembered on this device) -----
-const savedTheme = () => { try { return localStorage.getItem("theme"); } catch (e) { return null; } };
+// ----- Theme: "system" (default, follows the OS) or a manual light/dark choice remembered on this device -----
+const systemTheme = () => (matchMedia("(prefers-color-scheme: light)").matches ? "light" : "dark");
+function themePref() {
+  try { const v = localStorage.getItem("theme"); return v === "light" || v === "dark" ? v : "system"; } catch (e) { return "system"; }
+}
 function applyTheme(theme) {
   document.documentElement.dataset.theme = theme;
   document.querySelector('meta[name="theme-color"]').content = theme === "dark" ? "#0E1116" : "#F4F4F0";
 }
-function toggleTheme() {
-  const next = document.documentElement.dataset.theme === "dark" ? "light" : "dark";
-  try { localStorage.setItem("theme", next); } catch (e) {}
-  applyTheme(next);
+function setThemePref(pref) {
+  try { if (pref === "system") localStorage.removeItem("theme"); else localStorage.setItem("theme", pref); } catch (e) {}
+  applyTheme(pref === "system" ? systemTheme() : pref);
 }
-applyTheme(document.documentElement.dataset.theme === "light" ? "light" : "dark");
-matchMedia("(prefers-color-scheme: light)").addEventListener?.("change", e => {
-  if (!savedTheme()) applyTheme(e.matches ? "light" : "dark");
+setThemePref(themePref());
+matchMedia("(prefers-color-scheme: light)").addEventListener?.("change", () => {
+  if (themePref() === "system") applyTheme(systemTheme());
 });
 
 // ----- State -----
@@ -297,16 +313,140 @@ $("monthBtn").onclick = () => { try { $("month").showPicker(); } catch (e) { /* 
 $("month").onchange = e => setMonth(e.target.value);
 $("month").value = selectedMonth;
 
-// ----- Account menu -----
-function openAccountMenu(anchor) {
-  const dark = document.documentElement.dataset.theme === "dark";
-  const items = [];
-  if (user) items.push({ header: user.email || user.displayName || "" });
-  items.push({ icon: dark ? "sun" : "moon", label: t(dark ? "themeToLight" : "themeToDark"), onSelect: toggleTheme });
-  items.push({ icon: "globe", label: lang === "en" ? "বাংলা" : "English", lang: lang === "en" ? "bn" : "en", onSelect: toggleLang });
-  if (user) items.push({ icon: "calendar", label: t("cycleMenu", { day: fmtInt(startDay) }), onSelect: openCycleDialog });
-  if (user) items.push({ icon: "logout", label: t("signOut"), onSelect: guard(signOutAndClear) });
-  openMenu(anchor, items);
+// ----- Sync status: "synced", "syncing", "offline" (nothing waiting) or "offline-pending" -----
+// pendingWrites covers this session. Writes queued by an earlier session (reloaded while offline) live only in
+// Firestore's own queue, so on sign-in we also wait on that. "Syncing" appears after a short delay so a normal
+// online write (acknowledged in a few hundred ms) doesn't make the status flicker.
+const SYNC_TEXT = { synced: "syncSynced", syncing: "syncSyncing", offline: "syncOffline", "offline-pending": "syncOfflinePending" };
+let queuedFromBefore = false, syncShown = "synced", syncTimer;
+function syncState() {
+  const pending = pendingWrites > 0 || queuedFromBefore;
+  if (!navigator.onLine) return pending ? "offline-pending" : "offline";
+  return pending ? "syncing" : "synced";
+}
+function updateSync() {
+  const next = syncState();
+  clearTimeout(syncTimer);
+  if (next === "syncing" && syncShown === "synced") {
+    syncTimer = setTimeout(() => { if (syncState() === "syncing") showSync("syncing"); }, 600);
+  } else showSync(next);
+}
+function showSync(state) {
+  syncShown = state;
+  document.body.dataset.sync = state;
+  document.querySelectorAll(".sync-text").forEach(el => { el.textContent = t(SYNC_TEXT[state]); });
+  $("accountBtn").setAttribute("aria-label", user ? `${t("accountMenu")} · ${t(SYNC_TEXT[state])}` : t("accountMenu"));
+}
+function watchQueuedWrites() {
+  const uid = user.uid;
+  queuedFromBefore = true;
+  updateSync();
+  waitForPendingWrites(db).catch(() => {}).finally(() => {
+    if (user?.uid !== uid) return;
+    queuedFromBefore = false;
+    updateSync();
+  });
+}
+window.addEventListener("online", updateSync);
+window.addEventListener("offline", updateSync);
+
+// ----- Account identity: Google photo with an initials fallback (also used offline, when the photo can't load) -----
+function initialsOf(u) {
+  const first = w => [...w][0] || "";
+  const words = (u.displayName || "").trim().split(/\s+/).filter(Boolean);
+  if (words.length) return (first(words[0]) + (words.length > 1 ? first(words[words.length - 1]) : "")).toUpperCase();
+  return first(u.email || "?").toUpperCase();
+}
+function fillAvatar(el) {
+  const key = user ? `${user.uid}|${user.photoURL || ""}|${user.displayName || ""}` : "";
+  if (el.dataset.key === key && el.firstChild) return; // don't refetch the photo on every render
+  el.dataset.key = key;
+  [...el.classList].filter(c => c.startsWith("tone-")).forEach(c => el.classList.remove(c));
+  el.classList.toggle("has-initials", !!user);
+  if (!user) { el.replaceChildren(svg("user", 18)); return; }
+  el.classList.add(`tone-${hashStr(user.uid) % 8}`);
+  const initials = h("span", { text: initialsOf(user) });
+  // Google photo URLs can refuse requests that carry a referrer; on any failure the initials underneath stay visible
+  el.replaceChildren(initials);
+  if (user.photoURL) el.append(h("img", { src: user.photoURL, alt: "", referrerpolicy: "no-referrer", decoding: "async", onerror: e => e.currentTarget.remove() }));
+}
+function renderAccount() {
+  const name = user ? (user.displayName || user.email || t("account")) : t("account");
+  document.querySelectorAll("[data-account-name]").forEach(el => { el.textContent = name; });
+  const email = user?.displayName && user.email ? user.email : "";
+  $("acctEmail").textContent = email;
+  $("acctEmail").hidden = !email;
+  document.querySelectorAll("[data-avatar]").forEach(fillAvatar);
+  $("acctCycleVal").textContent = t("cycleValue", { day: fmtInt(startDay) });
+  showSync(syncShown); // refreshes the text in the current language
+}
+
+// ----- Account panel: bottom sheet on phones, popover anchored to the account button from 600px up -----
+const wideLayout = matchMedia("(min-width: 600px)");
+const isShown = el => el.getClientRects().length > 0;
+let panelAnchor = null;
+function openAccount(anchor) {
+  const d = $("accountDialog");
+  if (d.open) { d.close(); return; }
+  closeMenu(false);
+  renderAccount();
+  d.querySelector(`input[name="themePref"][value="${themePref()}"]`).checked = true;
+  d.querySelector(`input[name="langPref"][value="${lang}"]`).checked = true;
+  panelAnchor = anchor;
+  anchor.setAttribute("aria-expanded", "true");
+  d.showModal();
+  placeAccount();
+  d.querySelector('input[name="themePref"]:checked').focus({ preventScroll: true });
+}
+function placeAccount() {
+  const d = $("accountDialog");
+  if (!d.open) return;
+  if (!wideLayout.matches) { d.style.left = d.style.top = ""; return; }
+  // Layout can change while open (window resized past a breakpoint): follow whichever account button is visible
+  if (!panelAnchor || !isShown(panelAnchor)) panelAnchor = [$("accountBtnSide"), $("accountBtn")].find(isShown) || panelAnchor;
+  const r = panelAnchor.getBoundingClientRect(), w = d.offsetWidth, ht = d.offsetHeight;
+  const fromSide = panelAnchor.id === "accountBtnSide";
+  const left = Math.min(innerWidth - w - 8, Math.max(8, fromSide ? r.left : r.right - w));
+  let top = r.bottom + 8;
+  if (top + ht > innerHeight - 8) top = Math.max(8, r.top - ht - 8);
+  d.style.left = left + "px";
+  d.style.top = top + "px";
+}
+window.addEventListener("resize", placeAccount);
+$("accountDialog").addEventListener("close", () => {
+  $("accountBtn").setAttribute("aria-expanded", "false");
+  $("accountBtnSide").setAttribute("aria-expanded", "false");
+  // Safari doesn't focus buttons on click, so the dialog has nothing to hand focus back to
+  const a = panelAnchor; panelAnchor = null;
+  if (a && isShown(a) && (!document.activeElement || document.activeElement === document.body)) a.focus({ preventScroll: true });
+});
+// The panel's content fills the dialog, so a click whose target is the dialog itself landed on the backdrop
+$("accountDialog").addEventListener("click", e => { if (e.target === e.currentTarget) e.currentTarget.close(); });
+document.querySelectorAll("#accountDialog [data-icon]").forEach(el => el.replaceWith(svg(el.dataset.icon, 18)));
+document.querySelectorAll('input[name="themePref"]').forEach(r => r.addEventListener("change", () => setThemePref(r.value)));
+document.querySelectorAll('input[name="langPref"]').forEach(r => r.addEventListener("change", () => setLang(r.value)));
+$("acctCycle").onclick = () => { $("accountDialog").close(); openCycleDialog(); };
+$("exportCsv").onclick = guard(() => exportData("csv"));
+$("exportJson").onclick = guard(() => exportData("json"));
+$("acctSignOut").onclick = guard(signOutSafely);
+$("accountBtn").onclick = e => openAccount(e.currentTarget);
+$("accountBtnSide").onclick = e => openAccount(e.currentTarget);
+
+// ----- Sign out -----
+const delay = ms => new Promise(r => setTimeout(r, ms));
+// Signing out wipes the offline cache, which also holds writes the server hasn't received yet.
+// Give them a chance to flush; if they can't (offline, or the server is slow), ask before throwing them away.
+async function signOutSafely() {
+  $("accountDialog").close();
+  const flushed = waitForPendingWrites(db).then(() => true, () => true);
+  let synced = await Promise.race([flushed, delay(400).then(() => false)]);
+  if (!synced && navigator.onLine) {
+    toast(t("signOutSyncing"));
+    synced = await Promise.race([flushed, delay(8000).then(() => false)]);
+    toast("");
+  }
+  if (!synced && !(await confirmAction(t("signOutUnsynced"), t("signOutAnyway")))) return;
+  await signOutAndClear();
 }
 // Sign out and wipe this device's offline copy of the data, so the next person on a shared browser can't read it
 async function signOutAndClear() {
@@ -315,6 +455,59 @@ async function signOutAndClear() {
   try { await terminate(db); await clearIndexedDbPersistence(db); }
   catch (e) { /* another tab still holds the cache; it is cleared once that tab signs out or closes */ }
   location.reload();
+}
+
+// ----- Export: CSV of every entry (for spreadsheets) or a JSON backup of everything -----
+const ENTRY_COLS = [["expenses", "expense"], ["income", "income"], ["planned", "planned"]];
+const ALL_COLS = ["expenses", "income", "planned", "recurring", "recurringIncome"];
+const SETTINGS_DOCS = ["categories", "budgets", "preferences"];
+// Quotes when needed; a leading = + - @ is neutralised so spreadsheets don't run a note as a formula
+function csvCell(v) {
+  if (typeof v === "number") return String(v);
+  let s = String(v ?? "");
+  if (/^[=+\-@\t\r]/.test(s)) s = "'" + s;
+  return /[",\r\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
+}
+function download(name, text, type) {
+  const url = URL.createObjectURL(new Blob([text], { type }));
+  const a = h("a", { href: url, download: name, style: "display:none" });
+  document.body.append(a);
+  a.click();
+  a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 10000);
+}
+async function exportData(format) {
+  const uid = user.uid, btn = $(format === "csv" ? "exportCsv" : "exportJson");
+  btn.disabled = true;
+  try {
+    // getDocs reads the server when reachable and falls back to this device's cache when offline
+    const [snaps, settings] = await Promise.all([
+      Promise.all(ALL_COLS.map(n => getDocs(userCol(n)))),
+      Promise.all(SETTINGS_DOCS.map(n => getDoc(userDoc("settings", n))))
+    ]);
+    if (user?.uid !== uid) return;
+    const data = Object.fromEntries(ALL_COLS.map((n, i) => [n, mapDocs(snaps[i])]));
+    const stamp = todayISO();
+    if (format === "json") {
+      const out = {
+        app: "expense-ledger", version: 1, exportedAt: new Date().toISOString(),
+        settings: Object.fromEntries(SETTINGS_DOCS.map((n, i) => [n, settings[i].exists() ? settings[i].data() : null])),
+        ...data
+      };
+      download(`expense-ledger-backup-${stamp}.json`, JSON.stringify(out, null, 2), "application/json");
+    } else {
+      const rows = ENTRY_COLS.flatMap(([n, type]) => data[n].map(e =>
+        [type, e.date || "", e.category || "", Number(e.amount) || 0, e.note || "", e.recurringId ? "yes" : ""]));
+      rows.sort((x, y) => (x[1] < y[1] ? -1 : x[1] > y[1] ? 1 : 0));
+      const lines = [["Type", "Date", "Category", "Amount", "Note", "Recurring"], ...rows].map(r => r.map(csvCell).join(","));
+      // BOM so Excel reads UTF-8 (Bangla notes) correctly
+      download(`expense-ledger-${stamp}.csv`, "\uFEFF" + lines.join("\r\n"), "text/csv;charset=utf-8");
+    }
+    const fromCache = [...snaps, ...settings].some(x => x.metadata.fromCache);
+    toast(t(fromCache ? "exportedOffline" : "exported"));
+  } finally {
+    btn.disabled = false;
+  }
 }
 
 // Styled confirm for deletes that are hard to redo by hand. Resolves true only on the confirm button.
@@ -360,8 +553,6 @@ function openCycleDialog() {
 try { $("insightsCard").open = localStorage.getItem("insightsOpen") === "1"; } catch (e) {}
 $("insightsCard").addEventListener("toggle", e => { try { localStorage.setItem("insightsOpen", e.currentTarget.open ? "1" : "0"); } catch (err) {} });
 
-$("accountBtn").onclick = e => openAccountMenu(e.currentTarget);
-$("accountBtnSide").onclick = e => openAccountMenu(e.currentTarget);
 
 // ----- Language (remembered on this device) -----
 function applyLang() {
@@ -371,14 +562,14 @@ function applyLang() {
   document.querySelectorAll("[data-i18n]").forEach(el => { el.textContent = t(el.dataset.i18n); });
   document.querySelectorAll("[data-i18n-ph]").forEach(el => { el.placeholder = t(el.dataset.i18nPh); });
   document.querySelectorAll("[data-i18n-aria]").forEach(el => { el.setAttribute("aria-label", t(el.dataset.i18nAria)); });
-  $("accountBtnSide").setAttribute("aria-label", t("accountMenu"));
   showTab(currentTab);
   setKind(entryKind);
   budgetEditKey = "";
   renderAll();
 }
-function toggleLang() {
-  lang = lang === "en" ? "bn" : "en";
+function setLang(next) {
+  if (next === lang) return;
+  lang = next;
   try { localStorage.setItem("lang", lang); } catch (e) {}
   applyLang();
 }
@@ -554,11 +745,14 @@ function init() {
     closeMenu(false);
     if ($("entryDialog").open) $("entryDialog").close();
     if ($("cycleDialog").open) $("cycleDialog").close();
+    if ($("accountDialog").open) $("accountDialog").close();
     if (u) {
       document.body.dataset.auth = "in";
       subscribeAll();
+      watchQueuedWrites();
     } else {
       document.body.dataset.auth = "out";
+      queuedFromBefore = false;
       expenses = []; income = []; planned = []; budgets = {}; recurring = []; recurringIncome = [];
       categories = [...DEFAULT_CATEGORIES];
       editingBudgets = false;
@@ -612,6 +806,7 @@ function renderAll() {
   renderSide();
   renderChart();
   renderBadges();
+  renderAccount();
 }
 
 function spentByCategory() {
