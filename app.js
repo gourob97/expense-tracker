@@ -632,9 +632,12 @@ function renderSummary() {
   $("leftLabel").textContent = t(left < 0 ? "overPlan" : "leftToSpend");
   $("leftValue").textContent = fmt(Math.abs(left));
   $("leftValue").classList.toggle("neg", left < 0);
-  $("leftSub").textContent = plannedTotal
-    ? t("heroSub", { balance: signed(balance), planned: fmt(plannedTotal) })
-    : t("heroSubNoPlan", { income: fmt(earned), spent: fmt(spent) });
+  // How the big number is reached, read top to bottom: balance − planned (or income − spent when nothing is planned)
+  const lines = plannedTotal
+    ? [["heroBalance", signed(balance), balance < 0 ? "neg" : "pos"], ["statPlanned", "− " + fmt(plannedTotal), "planned"]]
+    : [["statIncome", fmt(earned), "pos"], ["statSpent", "− " + fmt(spent), "spent"]];
+  $("leftSub").replaceChildren(...lines.map(([key, amt, tone]) => h("div", { class: `hb-row ${tone}` },
+    h("span", { class: "hb-label", text: t(key) }), h("span", { class: "hb-amt num", text: amt }))));
 
   const bar = $("stackBar");
   if (earned > 0 || spent > 0) {

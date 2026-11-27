@@ -10,6 +10,7 @@
   --ok: #4ADE80; --bar-neutral: #AEB6C2;
   --shadow: 0 8px 24px rgba(0, 0, 0, .45);
   --hero-bg: var(--surface); --hero-text: var(--text); --hero-muted: var(--muted); --hero-track: var(--track);
+  --hero-ok: var(--ok); --hero-accent: var(--accent-text); --hero-danger: var(--danger);
   --r-xl: 22px; --r-lg: 18px; --r-md: 14px; --r-sm: 10px;
   --nav-h: 84px;
   color-scheme: dark;
@@ -174,7 +175,14 @@ body:not([data-auth="in"]) main { padding-bottom: 40px }
 .hero { display: flex; flex-direction: column; gap: 4px }
 .hero-value { font-size: 40px; font-weight: 700; letter-spacing: -.03em; line-height: 1.1 }
 .hero-value.neg { color: var(--danger) }
-.hero-sub { font-size: 13px; color: var(--muted) }
+/* Breakdown under the bar: amounts coloured like what they are (money in, planned/spent in the bar's yellow) */
+.hero-breakdown { display: flex; flex-direction: column; gap: 4px; margin-top: 12px; font-size: 14px }
+.hb-row { display: flex; justify-content: space-between; align-items: baseline; gap: 12px }
+.hb-label { min-width: 0; color: var(--hero-muted) }
+.hb-amt { font-weight: 600; white-space: nowrap }
+.hb-row.pos .hb-amt { color: var(--hero-ok) }
+.hb-row.neg .hb-amt { color: var(--hero-danger) }
+.hb-row.planned .hb-amt, .hb-row.spent .hb-amt { color: var(--hero-accent) }
 .stack { display: flex; gap: 2px; height: 8px; margin-top: 12px; border-radius: 4px; overflow: hidden; background: var(--track) }
 .seg { display: block; height: 100% }
 .seg.spent, .key.spent { background: var(--accent) }
@@ -427,7 +435,7 @@ body:not([data-auth="in"]) .toast { bottom: 24px }
   .app { gap: 20px }
   .summary { padding: 24px; gap: 18px }
   .hero-value { font-size: 48px }
-  .hero-sub { font-size: 14px }
+  .hero-breakdown { font-size: 15px }
   .stack { height: 10px; border-radius: 5px }
   .kpis { gap: 12px }
   .kpi { padding: 12px 14px; border-radius: 14px; background: var(--sunken) }
@@ -500,12 +508,12 @@ body:not([data-auth="in"]) .toast { bottom: 24px }
   .kpis { display: contents }
   .hero, .kpi { background: var(--surface); border: 1px solid var(--line); border-radius: var(--r-lg); padding: 20px; gap: 6px; display: flex; flex-direction: column }
   .hero { background: var(--hero-bg); color: var(--hero-text) }
-  :root[data-theme="light"] .hero { --hero-bg: #16181D; --hero-text: #F4F4F0; --hero-muted: #B6BCC6; --hero-track: #2F343D; border-color: #16181D }
-  .hero .label, .hero .hero-sub { color: var(--hero-muted) }
+  :root[data-theme="light"] .hero { --hero-bg: #16181D; --hero-text: #F4F4F0; --hero-muted: #B6BCC6; --hero-track: #2F343D; --hero-ok: #4ADE80; --hero-accent: #F0B429; --hero-danger: #F87171; border-color: #16181D }
+  .hero .label { color: var(--hero-muted) }
   .hero .hero-value.neg { color: #F87171 }
   .hero-value { font-size: 32px }
-  .hero .stack { order: 3; height: 6px; margin: 4px 0 0; background: var(--hero-track) }
-  .hero .hero-sub { order: 4; font-size: 12px }
+  .hero .stack { height: 6px; margin: 4px 0 0; background: var(--hero-track) }
+  .hero .hero-breakdown { margin-top: 4px; font-size: 13px; gap: 2px }
   .kpi-value { font-size: 26px; font-weight: 700; letter-spacing: -.03em; margin: 0 }
   .kpi-sub { display: block; margin-top: auto }
   .kpi .key { display: none }
