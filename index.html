@@ -27,14 +27,17 @@ input:focus,select:focus{outline:1px solid var(--accent);border-color:var(--acce
 .row>*{flex:1 1 120px}
 .row>button{flex:0 0 auto}
 .muted{color:var(--muted);font-size:12px}
-.stats{display:grid;grid-template-columns:repeat(3,1fr);gap:12px}
+.stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:12px}
 .stat .v{font-size:22px;font-weight:600;margin-top:4px}
 .bar{height:4px;background:var(--line);margin-top:6px}
 .bar>div{height:100%;background:var(--accent)}
 .bar>div.over{background:var(--danger)}
-.item{display:flex;justify-content:space-between;align-items:center;padding:9px 0;border-bottom:1px solid var(--line);gap:10px}
+.item{display:flex;align-items:center;padding:9px 0;border-bottom:1px solid var(--line);gap:10px}
 .item:last-child{border-bottom:0}
-.amt{font-family:ui-monospace,Menlo,monospace;font-weight:600;white-space:nowrap}
+.item .info{flex:1 1 auto;min-width:0}
+.item .info div{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.item .actions{display:flex;gap:6px;flex:0 0 auto}
+.amt{flex:0 0 110px;text-align:right;font-family:ui-monospace,Menlo,monospace;font-weight:600;white-space:nowrap}
 .catrow{padding:7px 0;border-bottom:1px solid var(--line)}
 .catrow:last-child{border-bottom:0}
 .hidden{display:none!important}
@@ -73,7 +76,10 @@ input:focus,select:focus{outline:1px solid var(--accent);border-color:var(--acce
         <div class="stat"><div class="muted">Income</div><div class="v num" id="incomeTotal">৳0</div></div>
         <div class="stat"><div class="muted">Spent</div><div class="v num" id="total">৳0</div></div>
         <div class="stat"><div class="muted">Balance</div><div class="v num" id="balance">৳0</div></div>
+        <div class="stat"><div class="muted">Planned</div><div class="v num" id="planned">৳0</div></div>
+        <div class="stat"><div class="muted">Estimated left</div><div class="v num" id="afterPlanned">৳0</div></div>
       </div>
+      <p class="muted" style="margin:10px 0 0">Estimated left = balance minus everything you've planned this month.</p>
     </section>
 
     <div class="grid two">
@@ -110,12 +116,27 @@ input:focus,select:focus{outline:1px solid var(--accent);border-color:var(--acce
       </section>
     </div>
 
-    <section class="panel">
-      <h2>Categories &amp; budgets</h2>
-      <p class="muted" style="margin:0 0 6px">Leave a budget empty for no limit. Bars turn red when you go over.</p>
-      <div id="cats"></div>
-      <div class="row" style="margin-top:12px"><button id="saveBudgets">Save budgets</button></div>
-    </section>
+    <div class="grid two">
+      <section class="panel">
+        <h2>Planned spending</h2>
+        <p class="muted" style="margin:0 0 6px">Costs you intend to make this month. "Mark spent" turns one into a real expense.</p>
+        <div id="plannedList"></div>
+        <form id="planForm" class="grid" style="gap:8px;margin-top:12px">
+          <input type="number" id="pAmount" class="mono" placeholder="Amount (৳)" min="0" step="0.01" required>
+          <select id="pCategory"></select>
+          <input type="date" id="pDate" required>
+          <input type="text" id="pNote" placeholder="What, e.g. Eid shopping">
+          <button type="submit">Add planned</button>
+        </form>
+      </section>
+
+      <section class="panel">
+        <h2>Categories &amp; budgets</h2>
+        <p class="muted" style="margin:0 0 6px">Leave a budget empty for no limit. Bars turn red when you go over.</p>
+        <div id="cats"></div>
+        <div class="row" style="margin-top:12px"><button id="saveBudgets">Save budgets</button></div>
+      </section>
+    </div>
 
     <div class="grid two">
       <section class="panel">
@@ -189,7 +210,7 @@ initTheme();
 // ----- State -----
 let selectedMonth = todayISO().slice(0, 7);
 let user = null;
-let expenses = [], income = [], budgets = {}, recurring = [], recurringIncome = [];
+let expenses = [], income = [], planned = [], budgets = {}, recurring = [], recurringIncome = [];
 let unsubs = [], monthUnsubs = [];
 let auth, db;
 
@@ -208,17 +229,20 @@ function init() {
   CATEGORIES.forEach(c => {
     $("category").add(new Option(c, c));
     $("rCategory").add(new Option(c, c));
+    $("pCategory").add(new Option(c, c));
   });
   buildCategoryRows();
   $("month").value = selectedMonth;
   $("date").value = todayISO();
   $("iDate").value = todayISO();
+  $("pDate").value = todayISO();
 
   $("month").onchange = e => { selectedMonth = e.target.value; if (user) subscribeMonth(); };
   $("signInBtn").onclick = guard(() => signInWithPopup(auth, new GoogleAuthProvider()));
   $("signOutBtn").onclick = guard(() => signOut(auth));
   $("addForm").onsubmit = e => { e.preventDefault(); guard(addExpense)(); };
   $("incForm").onsubmit = e => { e.preventDefault(); guard(addIncome)(); };
+  $("planForm").onsubmit = e => { e.preventDefault(); guard(addPlanned)(); };
   $("recForm").onsubmit = e => { e.preventDefault(); guard(addRecurring)(); };
   $("recIncForm").onsubmit = e => { e.preventDefault(); guard(addRecurringIncome)(); };
   $("saveBudgets").onclick = guard(saveBudgets);
@@ -237,7 +261,7 @@ function init() {
       $("loginCard").classList.remove("hidden");
       $("appCards").classList.add("hidden");
       $("who").textContent = "";
-      expenses = []; income = []; budgets = {}; recurring = []; recurringIncome = [];
+      expenses = []; income = []; planned = []; budgets = {}; recurring = []; recurringIncome = [];
     }
   });
 }
@@ -272,7 +296,7 @@ function subscribeAll() {
   }, onErr));
 }
 
-// Listens to expenses and income for the selected month only
+// Listens to expenses, income and planned items for the selected month only
 function subscribeMonth() {
   monthUnsubs.forEach(f => f()); monthUnsubs = [];
   const start = `${selectedMonth}-01`, end = `${selectedMonth}-31`;
@@ -286,6 +310,9 @@ function subscribeMonth() {
   }, onErr));
   monthUnsubs.push(onSnapshot(monthQuery("income"), s => {
     income = mapDocs(s); renderSummary(); renderLists();
+  }, onErr));
+  monthUnsubs.push(onSnapshot(monthQuery("planned"), s => {
+    planned = mapDocs(s); renderSummary(); renderLists();
   }, onErr));
 }
 
@@ -317,11 +344,17 @@ function renderSummary() {
   const [y, m] = selectedMonth.split("-").map(Number);
   $("monthLabel").textContent = new Date(y, m - 1, 1).toLocaleString("en-US", { month: "long", year: "numeric" });
   const spent = sum(expenses), earned = sum(income), balance = earned - spent;
+  const plannedTotal = sum(planned), estimatedLeft = balance - plannedTotal;
   $("incomeTotal").textContent = fmt(earned);
   $("total").textContent = fmt(spent);
-  $("balance").textContent = (balance < 0 ? "-" : "") + fmt(Math.abs(balance));
+  $("balance").textContent = signed(balance);
   $("balance").style.color = balance < 0 ? "var(--danger)" : "var(--ok)";
+  $("planned").textContent = fmt(plannedTotal);
+  $("afterPlanned").textContent = signed(estimatedLeft);
+  $("afterPlanned").style.color = estimatedLeft < 0 ? "var(--danger)" : "var(--ok)";
 }
+
+function signed(n) { return (n < 0 ? "-" : "") + fmt(Math.abs(n)); }
 
 function renderMonth() {
   const total = sum(expenses);
@@ -344,7 +377,7 @@ function renderMonth() {
   });
 }
 
-// Shared renderer for every list: items are {title, sub, amount, onDelete}
+// Shared renderer for every list: items are {title, sub, amount, onDelete, onAction?, actionLabel?}
 function renderRows(boxId, items, emptyMsg) {
   const box = $(boxId);
   box.replaceChildren();
@@ -353,21 +386,32 @@ function renderRows(boxId, items, emptyMsg) {
   items.forEach(it => {
     const row = document.createElement("div");
     row.className = "item";
-    const left = document.createElement("div");
+    const info = document.createElement("div");
+    info.className = "info";
     const t = document.createElement("div");
     t.textContent = it.title;
     const d = document.createElement("div");
     d.className = "muted";
     d.textContent = it.sub;
-    left.append(t, d);
+    info.append(t, d);
     const amt = document.createElement("span");
     amt.className = "amt";
     amt.textContent = fmt(it.amount);
+    const actions = document.createElement("div");
+    actions.className = "actions";
+    if (it.onAction) {
+      const act = document.createElement("button");
+      act.className = "small ghost";
+      act.textContent = it.actionLabel;
+      act.onclick = guard(it.onAction);
+      actions.append(act);
+    }
     const del = document.createElement("button");
     del.className = "small danger";
     del.textContent = "Delete";
     del.onclick = guard(it.onDelete);
-    row.append(left, amt, del);
+    actions.append(del);
+    row.append(info, amt, actions);
     box.appendChild(row);
   });
 }
@@ -382,6 +426,12 @@ function renderLists() {
     title: i.note || "Income", sub: i.date, amount: i.amount,
     onDelete: () => removeItem("income", i.id, "Delete this income entry?")
   })), "No income this month.");
+
+  renderRows("plannedList", planned.map(p => ({
+    title: p.category + (p.note ? " · " + p.note : ""), sub: p.date, amount: p.amount,
+    actionLabel: "Mark spent", onAction: () => markSpent(p),
+    onDelete: () => removeItem("planned", p.id, "Delete this planned item?")
+  })), "Nothing planned this month.");
 
   renderRows("recurring", recurring.map(r => ({
     title: r.note || r.category, sub: `${r.category} · day ${r.day} of each month`, amount: r.amount,
@@ -424,6 +474,29 @@ async function addIncome() {
   $("iAmount").value = "";
   $("iNote").value = "";
   setStatus("Income added.");
+}
+
+async function addPlanned() {
+  const amount = Number($("pAmount").value);
+  const date = $("pDate").value;
+  if (!(amount > 0) || !date) return;
+  await addDoc(collection(db, "users", user.uid, "planned"), {
+    amount, category: $("pCategory").value, date, note: $("pNote").value.trim(), createdAt: Date.now()
+  });
+  jumpToMonth(date);
+  $("pAmount").value = "";
+  $("pNote").value = "";
+  setStatus("Planned item added.");
+}
+
+// Turns a planned item into a real expense, then removes it from the plan
+async function markSpent(p) {
+  await addDoc(collection(db, "users", user.uid, "expenses"), {
+    amount: p.amount, category: p.category, date: p.date,
+    note: p.note || "", recurringId: null, createdAt: Date.now()
+  });
+  await deleteDoc(doc(db, "users", user.uid, "planned", p.id));
+  setStatus("Moved to expenses.");
 }
 
 async function saveBudgets() {
