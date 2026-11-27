@@ -26,7 +26,7 @@ jobs:
       - name: Syntax check the scripts
         run: |
           # .mjs copies so node parses them as ES modules
-          for f in app.js i18n.js period.js loans.js; do cp "$f" "$RUNNER_TEMP/${f%.js}.mjs"; node --check "$RUNNER_TEMP/${f%.js}.mjs"; done
+          for f in app.js i18n.js period.js loans.js amount.js; do cp "$f" "$RUNNER_TEMP/${f%.js}.mjs"; node --check "$RUNNER_TEMP/${f%.js}.mjs"; done
           node --check sw.js
           node -e 'JSON.parse(require("fs").readFileSync("manifest.webmanifest", "utf8"))'
       - name: Unit tests

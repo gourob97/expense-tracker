@@ -308,56 +308,72 @@ try {
       <h2 id="entryTitle" data-i18n="newEntry">New entry</h2>
       <span></span>
     </div>
-    <div class="segmented" id="eKindSeg" role="radiogroup" aria-label="Entry type" data-i18n-aria="entryType">
+    <div class="segmented four" id="eKindSeg" role="radiogroup" aria-label="Entry type" data-i18n-aria="entryType">
       <label><input type="radio" name="kind" value="expense" checked><span data-i18n="kindExpense">Expense</span></label>
       <label><input type="radio" name="kind" value="income"><span data-i18n="kindIncome">Income</span></label>
       <label><input type="radio" name="kind" value="planned"><span data-i18n="kindPlanned">Planned</span></label>
+      <label><input type="radio" name="kind" value="loan"><span data-i18n="kindLoan">Loan</span></label>
     </div>
-    <div class="amount-field">
-      <label for="eAmount" data-i18n="amount">Amount</label>
-      <div class="amount-input"><span aria-hidden="true">৳</span><input id="eAmount" class="num" inputmode="decimal" autocomplete="off" placeholder="0" required></div>
+
+    <!-- Loan only: which way the money went -->
+    <div class="dir-field" id="eDirField" hidden>
+      <div class="dir-toggle" role="radiogroup" aria-label="Money direction" data-i18n-aria="loanDirLabel">
+        <label class="dir-opt"><input type="radio" name="loanDir" value="gave" checked><span><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M7 17L17 7"/><path d="M9 7h8v8"/></svg><span data-i18n="iGave">I gave</span></span></label>
+        <label class="dir-opt"><input type="radio" name="loanDir" value="got"><span><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M17 7L7 17"/><path d="M15 17H7V9"/></svg><span data-i18n="iGot">I got</span></span></label>
+      </div>
+      <p class="hint" id="eDirHint"></p>
     </div>
-    <fieldset class="cat-field" id="eCatField">
+
+    <!-- Amount: wording and colour follow the entry type (spent / received / gave / got) -->
+    <div class="amount-box" id="eAmountBox" data-tone="out">
+      <label for="eAmount" class="amount-label" id="eAmountLabel">You spent</label>
+      <div class="amount-row">
+        <span class="amount-sign" id="eAmountSign" aria-hidden="true"></span>
+        <span class="amount-cur" aria-hidden="true">৳</span>
+        <input id="eAmount" class="num" inputmode="decimal" autocomplete="off" placeholder="0" aria-describedby="eAmountErr">
+        <button type="button" class="icon-btn amount-clear" id="eAmountClear" aria-label="Clear amount" data-i18n-aria="clearAmount" hidden><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M9 9l6 6"/><path d="M15 9l-6 6"/></svg></button>
+      </div>
+    </div>
+    <p class="field-error" id="eAmountErr" hidden></p>
+
+    <fieldset class="chip-field" id="eCatField">
       <legend data-i18n="category">Category</legend>
-      <div class="cat-grid" id="eCatGrid"></div>
+      <div class="chip-row" id="eCatGrid"></div>
     </fieldset>
+
+    <fieldset class="chip-field" id="ePersonField" hidden>
+      <legend data-i18n="person">Person</legend>
+      <div class="chip-row" id="ePeople"></div>
+      <input type="text" class="input" id="ePersonNew" list="peopleNames" maxlength="40" autocomplete="off" data-i18n-ph="phPerson" placeholder="Name" aria-label="New person’s name" data-i18n-aria="phPerson" aria-describedby="ePersonErr" hidden>
+      <p class="field-error" id="ePersonErr" hidden></p>
+      <datalist id="peopleNames"></datalist>
+    </fieldset>
+
+    <fieldset class="chip-field" id="eDateField">
+      <legend data-i18n="date">Date</legend>
+      <div class="chip-row">
+        <label class="chip-opt"><input type="radio" name="dateChoice" value="today"><span class="chip-face" data-i18n="today">Today</span></label>
+        <label class="chip-opt"><input type="radio" name="dateChoice" value="yesterday"><span class="chip-face" data-i18n="yesterday">Yesterday</span></label>
+        <label class="chip-opt date-pick" id="eDatePick">
+          <span class="chip-face"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="5" width="18" height="16" rx="2"/><path d="M3 10h18"/><path d="M8 3v4"/><path d="M16 3v4"/></svg><span id="eDateLabel">Pick date</span></span>
+          <input type="date" id="eDate" aria-label="Date" data-i18n-aria="date">
+        </label>
+      </div>
+      <p class="field-error" id="eDateErr" hidden></p>
+    </fieldset>
+
     <div class="field-group">
-      <label class="field-row" id="eDateRow"><span data-i18n="date">Date</span><input type="date" id="eDate" required></label>
       <label class="field-row" id="eDayRow" hidden><span data-i18n="dayOfMonthLabel">Day of month</span><select id="eDay"></select></label>
       <label class="field-row"><span data-i18n="note">Note</span><input type="text" id="eNote" maxlength="80" autocomplete="off"></label>
       <label class="field-row" id="eRepeatRow"><span data-i18n="repeatMonthly">Repeat every month</span><input type="checkbox" role="switch" id="eRepeat" class="switch"></label>
     </div>
-    <button type="submit" class="btn primary block big" id="entrySubmit">Add expense</button>
-  </form>
-</dialog>
+    <div class="suggest" id="eSuggest" hidden></div>
 
-<dialog id="loanDialog" class="sheet" aria-labelledby="loanTitle">
-  <form id="loanForm" novalidate>
-    <div class="grabber" aria-hidden="true"></div>
-    <div class="sheet-head">
-      <button type="button" class="text-btn muted-btn" id="loanCancel" data-i18n="cancel">Cancel</button>
-      <h2 id="loanTitle" data-i18n="newLoan">New loan entry</h2>
-      <span></span>
+    <!-- Stays at the bottom of the sheet while the rest scrolls -->
+    <div class="sheet-foot">
+      <p class="loan-preview" id="ePreview" aria-live="polite" hidden></p>
+      <button type="submit" class="btn primary block big" id="entrySubmit">Add expense</button>
     </div>
-    <div class="loan-dir">
-      <div class="segmented two" role="radiogroup" aria-label="Money direction" data-i18n-aria="loanDirLabel">
-        <label><input type="radio" name="loanDir" value="gave" checked><span data-i18n="iGave">I gave</span></label>
-        <label><input type="radio" name="loanDir" value="got"><span data-i18n="iGot">I got</span></label>
-      </div>
-      <p class="hint" id="lDirHint"></p>
-    </div>
-    <div class="amount-field">
-      <label for="lAmount" data-i18n="amount">Amount</label>
-      <div class="amount-input"><span aria-hidden="true">৳</span><input id="lAmount" class="num" inputmode="decimal" autocomplete="off" placeholder="0" required></div>
-    </div>
-    <div class="field-group">
-      <label class="field-row"><span data-i18n="person">Person</span><input type="text" id="lPerson" list="peopleNames" maxlength="40" autocomplete="off" data-i18n-ph="phPerson" placeholder="Name"></label>
-      <label class="field-row"><span data-i18n="date">Date</span><input type="date" id="lDate" required></label>
-      <label class="field-row"><span data-i18n="note">Note</span><input type="text" id="lNote" maxlength="80" autocomplete="off" data-i18n-ph="phLoanNote" placeholder="e.g. For the phone"></label>
-    </div>
-    <datalist id="peopleNames"></datalist>
-    <p class="loan-preview" id="lPreview" aria-live="polite"></p>
-    <button type="submit" class="btn primary block big" id="loanSubmit" data-i18n="save">Save</button>
   </form>
 </dialog>
 

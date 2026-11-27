@@ -7,6 +7,7 @@ import {
 } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
 import { STRINGS, CAT_BN } from "./i18n.js";
 import { periodRange, periodOf, shiftPeriod, dateInPeriod, addDays, daysBetween, inPeriod, isPeriodKey, normalizeStartDay, DEFAULT_START_DAY } from "./period.js";
+import { formatAmountInput } from "./amount.js";
 import { balances, totals, flowBetween, history as personHistory, balanceWith, findPerson, cleanName } from "./loans.js";
 
 // ===== FIREBASE WEB CONFIG =====
@@ -179,6 +180,29 @@ const parseNum = str => {
   const s = String(str ?? "").trim().replace(/[০-৯]/g, d => "০১২৩৪৫৬৭৮৯".indexOf(d)).replace(/[,\s৳]/g, "");
   return /^-?(\d+\.?\d*|\.\d+)$/.test(s) ? Number(s) : NaN;
 };
+// Amount inputs are text fields (type=number mangles Bangla digits and decimals), so filter what gets typed or
+// pasted and group it as 1,25,000. Bound before any other input listener so those see the formatted value. Skipped
+// mid-composition: changing the value then breaks IME keyboards (Bangla phonetic input); compositionend cleans up.
+function setAmountText(el, raw, caret = String(raw).length) {
+  const { value, caret: at } = formatAmountInput(String(raw), caret);
+  if (value !== el.value) el.value = value;
+  if (document.activeElement === el) el.setSelectionRange(at, at);
+}
+function bindAmountInput(el) {
+  const reformat = () => setAmountText(el, el.value, el.selectionStart ?? el.value.length);
+  el.addEventListener("input", e => { if (!e.isComposing) reformat(); });
+  el.addEventListener("compositionend", reformat);
+  // Backspace just after a grouping comma (or Delete just before one) removes the digit beyond it; deleting only
+  // the comma would be undone by the regrouping, so the key would seem to do nothing
+  el.addEventListener("beforeinput", e => {
+    const s = el.selectionStart, v = el.value;
+    if (s == null || s !== el.selectionEnd) return;
+    const back = e.inputType === "deleteContentBackward", fwd = e.inputType === "deleteContentForward";
+    if (back && v[s - 1] === "," && s >= 2) { e.preventDefault(); setAmountText(el, v.slice(0, s - 2) + v.slice(s), s - 2); el.dispatchEvent(new Event("input")); }
+    else if (fwd && v[s] === ",") { e.preventDefault(); setAmountText(el, v.slice(0, s + 1) + v.slice(s + 2), s); el.dispatchEvent(new Event("input")); }
+  });
+}
+bindAmountInput($("eAmount"));
 
 // ----- Toast: confirmations auto-hide, errors stay until tapped, optional action (Undo) -----
 let toastTimer;
@@ -211,7 +235,7 @@ function closeDialog(d, { instant = false } = {}) {
 }
 // Esc (and Android back) animate out too. If the browser won't allow the close to be deferred, it closes at once.
 // The confirm dialog handles cancel itself, since it has to resolve its promise.
-["entryDialog", "cycleDialog", "accountDialog", "loanDialog", "nameDialog"].forEach(id => $(id).addEventListener("cancel", e => {
+["entryDialog", "cycleDialog", "accountDialog", "nameDialog"].forEach(id => $(id).addEventListener("cancel", e => {
   if (!e.cancelable) return;
   e.preventDefault();
   closeDialog(e.currentTarget);
@@ -670,71 +694,237 @@ function initInAppNotice() {
   }
 }
 
-// ===== Entry sheet (expense / income / planned; add or edit) =====
+// ===== Entry sheet: expense / income / planned / loan, add or edit =====
 let entryKind = "expense";
 // Set while the sheet edits an existing item: { col, item }. Null when adding.
 let editing = null;
-const COL_KIND = { expenses: "expense", income: "income", planned: "planned", recurring: "expense", recurringIncome: "income" };
+const COL_KIND = { expenses: "expense", income: "income", planned: "planned", recurring: "expense", recurringIncome: "income", loanTxns: "loan" };
 const isRuleCol = col => col === "recurring" || col === "recurringIncome";
+const usesCategory = kind => kind === "expense" || kind === "planned";
+const loanDir = () => document.querySelector('input[name="loanDir"]:checked')?.value || "gave";
+
 function setKind(kind) {
   entryKind = kind;
   const radio = document.querySelector(`input[name="kind"][value="${kind}"]`);
   if (radio) radio.checked = true;
-  $("eCatField").hidden = kind === "income";
-  $("eRepeatRow").hidden = kind === "planned" || !!editing;
-  $("eNote").placeholder = t(kind === "income" ? "phSource" : kind === "planned" ? "phWhat" : "phNote");
+  const loan = kind === "loan";
+  $("eCatField").hidden = !usesCategory(kind);
+  $("ePersonField").hidden = !loan;
+  $("eDirField").hidden = !loan;
+  $("eRepeatRow").hidden = kind === "planned" || loan || !!editing;
+  $("eNote").placeholder = t(kind === "income" ? "phSource" : kind === "planned" ? "phWhat" : loan ? "phLoanNote" : "phNote");
   $("entrySubmit").textContent = t(editing ? "saveChanges" : ADD_LABEL[kind]);
+  clearFieldErrors();
+  updateSheet();
 }
 document.querySelectorAll('input[name="kind"]').forEach(r => { r.onchange = () => setKind(r.value); });
+document.querySelectorAll('input[name="loanDir"]').forEach(r => { r.onchange = updateSheet; });
 
-// `select` pre-selects a category; one since removed from the list is still offered so editing can keep it
+// The amount box says what the money did and takes its colour: out (spent, gave), in (received, got), planned
+const AMOUNT_MODE = {
+  expense: ["amtSpent", "−", "out"], planned: ["amtPlan", "", "plan"], income: ["amtReceived", "+", "in"],
+  gave: ["amtGave", "−", "out"], got: ["amtGot", "+", "in"]
+};
+// Everything in the sheet that depends on the type, direction, amount, person or note
+function updateSheet() {
+  const loan = entryKind === "loan", dir = loanDir();
+  const [label, sign, tone] = AMOUNT_MODE[loan ? dir : entryKind];
+  const hasAmount = $("eAmount").value !== "";
+  $("eAmountLabel").textContent = t(label);
+  $("eAmountSign").textContent = hasAmount ? sign : "";
+  $("eAmountBox").dataset.tone = tone;
+  $("eAmountClear").hidden = !hasAmount;
+  $("eDirHint").textContent = t(dir === "gave" ? "dirHintGave" : "dirHintGot");
+  updateLoanPreview();
+  renderSuggestions();
+}
+
+// ----- Inline errors, shown under the field they're about -----
+function fieldError(id, msg) { const el = $(id); el.textContent = msg; el.hidden = !msg; }
+function clearFieldErrors() {
+  ["eAmountErr", "ePersonErr", "eDateErr"].forEach(id => fieldError(id, ""));
+  $("eAmountBox").classList.remove("invalid");
+  $("eAmount").removeAttribute("aria-invalid");
+}
+$("eAmount").addEventListener("input", () => { $("eAmountBox").classList.remove("invalid"); $("eAmount").removeAttribute("aria-invalid"); fieldError("eAmountErr", ""); updateSheet(); });
+$("eAmountClear").onclick = () => { $("eAmount").value = ""; $("eAmount").focus(); updateSheet(); };
+$("eAmountBox").addEventListener("click", e => { if (!e.target.closest("button, input")) $("eAmount").focus(); });
+
+// ----- Category chips: most used this month first (ties keep the list order). `select` pre-selects one; a
+// category since removed from the list is still offered so editing can keep it. -----
 function buildCatGrid(select) {
   const grid = $("eCatGrid");
   const prev = select || grid.querySelector("input:checked")?.value;
-  const list = select && !categories.includes(select) ? [...categories, select] : categories;
+  const base = select && !categories.includes(select) ? [...categories, select] : categories;
+  const uses = {};
+  [...expenses, ...planned].forEach(e => { uses[e.category] = (uses[e.category] || 0) + 1; });
+  const list = base.map((c, i) => [c, i]).sort((a, b) => (uses[b[0]] || 0) - (uses[a[0]] || 0) || a[1] - b[1]).map(([c]) => c);
   grid.replaceChildren(...list.map((c, i) => {
     const s = catStyle(c);
-    return h("label", { class: "cat-opt" },
+    return h("label", { class: "chip-opt" },
       h("input", { type: "radio", name: "cat", value: c, checked: (prev ? prev === c : i === 0) || null }),
-      h("span", { class: "tile" }, h("span", { class: `cat-icon sm tone-${s.tone}` }, svg(s.icon, 18)), h("span", { class: "tile-name", text: catLabel(c) })));
+      h("span", { class: "chip-face" }, h("span", { class: `cat-icon xs tone-${s.tone}` }, svg(s.icon, 16)), h("span", { text: catLabel(c) })));
   }));
   if (!grid.querySelector("input:checked")) grid.querySelector("input")?.click();
 }
-// Default date: today when viewing the current period, otherwise the first day of the viewed period
-const defaultDate = () => { const r = currentRange(), today = todayISO(); return inPeriod(today, r) ? today : r.start; };
+const checkCategory = c => { const r = [...$("eCatGrid").querySelectorAll("input")].find(i => i.value === c); if (r) r.checked = true; };
 
-function openSheet(kind, col, item) {
+// ----- Person chips (loan): the 8 most recently active people with their balance, plus "New" -----
+function buildPeopleChips(selectedId, { allowNew = true } = {}) {
+  const st = loanState();
+  const recent = [...st.entries].sort((a, b) => (b.last || "").localeCompare(a.last || "") || a.person.name.localeCompare(b.person.name));
+  let shown = recent.slice(0, 8);
+  if (selectedId && st.byId.has(selectedId) && !shown.some(e => e.person.id === selectedId)) shown = [st.byId.get(selectedId), ...shown.slice(0, 7)];
+  const chip = e => h("label", { class: "chip-opt person-chip" },
+    h("input", { type: "radio", name: "person", value: e.person.id, checked: e.person.id === selectedId || null }),
+    h("span", { class: "chip-face" }, personIcon(e.person),
+      h("span", { class: "pc-text" }, h("span", { class: "pc-name", text: e.person.name }),
+        h("span", { class: `pc-bal ${balanceClass(e.balance)}`, text: e.balance ? `${balanceLabel(e.balance)} ${fmt(Math.abs(e.balance))}` : balanceLabel(0) }))));
+  // With nobody yet, "New" is the only choice, so it starts selected
+  const newChip = allowNew ? h("label", { class: "chip-opt new-chip" },
+    h("input", { type: "radio", name: "person", value: "", checked: (!selectedId && !shown.length) || null }),
+    h("span", { class: "chip-face" }, svg("plus", 16), h("span", { text: t("newPerson") }))) : null;
+  $("ePeople").replaceChildren(...shown.map(chip), newChip);
+  $("peopleNames").replaceChildren(...st.entries.map(e => h("option", { value: e.person.name })));
+  $("ePersonNew").value = "";
+  syncPersonNew();
+}
+const personChoice = () => $("ePeople").querySelector('input[name="person"]:checked')?.value;
+function syncPersonNew() { $("ePersonNew").hidden = personChoice() !== ""; }
+// The person the sheet points at: a chip, or a typed name (an existing person if it matches one)
+function sheetPerson() {
+  const v = personChoice();
+  if (v === undefined) return { person: null, typed: "", isNew: false };
+  if (v) return { person: people.find(p => p.id === v) || null, typed: "", isNew: false };
+  const typed = cleanName($("ePersonNew").value);
+  return { person: findPerson(people, typed), typed, isNew: true };
+}
+$("ePeople").addEventListener("change", () => {
+  syncPersonNew();
+  fieldError("ePersonErr", "");
+  if (personChoice() === "") $("ePersonNew").focus();
+  updateSheet();
+});
+$("ePersonNew").addEventListener("input", () => { fieldError("ePersonErr", ""); updateLoanPreview(); });
+
+// Live "After this: Rahim owes you ৳3,000" above Save
+function updateLoanPreview() {
+  const el = $("ePreview");
+  const amount = parseNum($("eAmount").value), { person, typed } = sheetPerson(), name = person ? person.name : typed;
+  if (entryKind !== "loan" || !name || !(amount > 0)) { el.hidden = true; el.textContent = ""; return; }
+  const txn = editing?.col === "loanTxns" ? editing.item : null;
+  const base = person ? loanState().byId.get(person.id)?.balance || 0 : 0;
+  // An edit replaces the entry's old effect, but only on the person it already belonged to
+  const next = balanceWith(base, { dir: loanDir(), amount }, txn && person && txn.personId === person.id ? txn : null);
+  el.textContent = t("previewAfter", { status: statusText(name, next) });
+  el.hidden = false;
+}
+
+// ----- Date chips: Today, Yesterday, or any date from the picker. eDate holds the value. -----
+function setDate(iso) { $("eDate").value = iso; syncDateChips(); }
+function syncDateChips() {
+  const v = $("eDate").value, today = todayISO(), yest = addDays(today, -1);
+  document.querySelectorAll('input[name="dateChoice"]').forEach(r => { r.checked = (r.value === "today" && v === today) || (r.value === "yesterday" && v === yest); });
+  const other = !!v && v !== today && v !== yest;
+  $("eDatePick").classList.toggle("selected", other);
+  $("eDateLabel").textContent = other ? fmtDate(v) : t("pickDate");
+  if (v) fieldError("eDateErr", "");
+}
+document.querySelectorAll('input[name="dateChoice"]').forEach(r => { r.onchange = () => setDate(r.value === "today" ? todayISO() : addDays(todayISO(), -1)); });
+$("eDate").addEventListener("change", syncDateChips);
+// The date input covers its chip invisibly: phones open their picker on tap; desktop browsers need showPicker()
+$("eDate").addEventListener("click", () => { try { $("eDate").showPicker(); } catch (e) { /* opens natively, or unsupported */ } });
+
+// ----- Note suggestions: the notes used most for this type, narrowed as you type. Picking one for an
+// expense or plan also picks the category it was last used with ("Uber" → Transport). -----
+function noteSuggestions(kind, typed) {
+  const src = kind === "income" ? income : kind === "loan" ? loanTxns : [...expenses, ...planned];
+  const byNote = new Map();
+  for (const x of src) {
+    const note = (x.note || "").trim();
+    if (!note) continue;
+    const key = note.toLocaleLowerCase(), at = x.createdAt || 0;
+    const m = byNote.get(key) || { note, count: 0, last: -1, category: null };
+    m.count++;
+    if (at >= m.last) { m.last = at; m.note = note; m.category = x.category || null; }
+    byNote.set(key, m);
+  }
+  const q = typed.trim().toLocaleLowerCase();
+  return [...byNote.values()]
+    .filter(m => { const n = m.note.toLocaleLowerCase(); return !q || (n.startsWith(q) && n !== q); })
+    .sort((a, b) => b.count - a.count || b.last - a.last).slice(0, 4);
+}
+function renderSuggestions() {
+  const box = $("eSuggest"), list = noteSuggestions(entryKind, $("eNote").value);
+  box.hidden = !list.length;
+  box.replaceChildren(...(list.length ? [h("span", { class: "suggest-label", text: t("recentNotes") })] : []),
+    ...list.map(m => h("button", { type: "button", class: "chip", onclick: () => {
+      $("eNote").value = m.note;
+      if (usesCategory(entryKind) && m.category) checkCategory(m.category);
+      renderSuggestions();
+    } }, m.note)));
+}
+$("eNote").addEventListener("input", renderSuggestions);
+
+// Default date: today when viewing the current period (or on Loans, which isn't tied to one), otherwise the first
+// day of the viewed period
+const defaultDate = () => { const r = currentRange(), today = todayISO(); return currentTab === "loans" || inPeriod(today, r) ? today : r.start; };
+
+// kind: the entry type; col + item: what is being edited (none when adding);
+// personId / dir: a new loan entry started from a person's page ("I gave" / "I got")
+function openSheet(kind, col = null, item = null, { personId = null, dir = null } = {}) {
   if (!user) return;
   editing = item ? { col, item } : null;
-  const rule = !!item && isRuleCol(col);
+  const rule = !!item && isRuleCol(col), loanEdit = col === "loanTxns";
   closeMenu(false);
   buildCatGrid(item?.category);
-  $("eKindSeg").hidden = !!item; // moving an item between expenses/income/planned isn't an edit
-  $("eDateRow").hidden = rule;
-  $("eDate").required = !rule;
+  const pid = loanEdit ? item.personId : personId;
+  const balance = (pid && loanState().byId.get(pid)?.balance) || 0;
+  document.querySelector(`input[name="loanDir"][value="${item?.dir || dir || (balance > 0 ? "got" : "gave")}"]`).checked = true;
+  buildPeopleChips(pid, { allowNew: !loanEdit });
+  $("eKindSeg").hidden = !!item; // moving an item between types isn't an edit
+  $("eDateField").hidden = rule;
   $("eDayRow").hidden = !rule;
-  setKind(kind);
-  $("entryTitle").textContent = t(!item ? "newEntry" : rule ? "editRecurring" : "editEntry");
-  $("eAmount").value = item ? plainFmt.format(item.amount) : "";
   $("eNote").value = item?.note || "";
   $("eRepeat").checked = false;
-  $("eDate").value = item && !rule ? item.date : defaultDate();
+  // The button that settles up pre-fills the outstanding amount (selected, so typing replaces it)
+  const settles = !item && dir && (dir === "got" ? balance > 0 : balance < 0);
+  const amount = item ? item.amount : settles ? Math.abs(balance) : null;
+  $("eAmount").value = amount == null ? "" : formatAmountInput(plainFmt.format(amount)).value;
+  setDate(item && !rule ? item.date : defaultDate());
   if (rule) {
     $("eDay").replaceChildren(...Array.from({ length: 31 }, (_, i) => h("option", { value: i + 1, text: fmtInt(i + 1) })));
     $("eDay").value = String(item.day);
   }
+  setKind(kind); // after the fields are filled: it refreshes everything that depends on them
+  $("entryTitle").textContent = t(!item ? "newEntry" : rule ? "editRecurring" : loanEdit ? "editLoan" : "editEntry");
   openDialog($("entryDialog"));
   $("eAmount").focus();
-  if (item) $("eAmount").select();
+  if ($("eAmount").value) $("eAmount").select();
 }
-const openEntry = (kind = KIND_FOR_TAB[currentTab]) => (kind === "loan" ? openLoanSheet({ personId: selectedPerson }) : openSheet(kind));
+const openEntry = (kind = KIND_FOR_TAB[currentTab]) => openSheet(kind, null, null, kind === "loan" ? { personId: selectedPerson } : {});
 const openEdit = (col, item) => openSheet(COL_KIND[col], col, item);
+const openLoanSheet = ({ personId = null, dir = null, txn = null } = {}) => openSheet("loan", txn ? "loanTxns" : null, txn, { personId, dir });
 $("fab").onclick = () => openEntry();
 $("addBtn").onclick = () => openEntry();
 $("entryCancel").onclick = () => closeDialog($("entryDialog"));
 // Clicking the dimmed backdrop closes the sheet
 $("entryDialog").addEventListener("click", e => { if (e.target === e.currentTarget) closeDialog(e.currentTarget); });
 $("entryForm").addEventListener("submit", e => { e.preventDefault(); guard(submitEntry)(); });
+
+// Phones: keep the sheet, and its Save button, above the on-screen keyboard. iOS doesn't shrink the layout viewport
+// for the keyboard, so the sheet is lifted by the part of the window the keyboard covers (0 everywhere else).
+const vv = window.visualViewport;
+function fitSheetToKeyboard() {
+  const a = document.activeElement;
+  const typing = !!a?.closest?.("dialog.sheet") && /^(INPUT|TEXTAREA|SELECT)$/.test(a.tagName);
+  const kb = vv && typing ? Math.max(0, Math.round(innerHeight - vv.height - vv.offsetTop)) : 0;
+  document.documentElement.style.setProperty("--kb", kb + "px");
+}
+vv?.addEventListener("resize", fitSheetToKeyboard);
+vv?.addEventListener("scroll", fitSheetToKeyboard);
+document.addEventListener("focusin", fitSheetToKeyboard);
+document.addEventListener("focusout", () => setTimeout(fitSheetToKeyboard, 60));
 
 // A write lands in the local cache at once, and the snapshot listeners update the screen from there; its promise
 // settles only when the server acknowledges it, which can take seconds, or never while offline. So the sheet closes
@@ -744,11 +934,19 @@ const writeInBackground = p => { p.catch(onErr); };
 function submitEntry() {
   if ("leaving" in $("entryDialog").dataset) return; // Enter while the sheet animates out
   const amount = parseNum($("eAmount").value);
-  if (!(amount > 0)) { toast(t("invalidAmount"), { error: true }); $("eAmount").focus(); return; }
   const editingRule = !!editing && isRuleCol(editing.col);
   const date = $("eDate").value;
-  if (!date && !editingRule) { $("eDate").focus(); return; }
+  let bad = null;
+  if (!(amount > 0)) {
+    fieldError("eAmountErr", t("amountNeeded"));
+    $("eAmountBox").classList.add("invalid");
+    $("eAmount").setAttribute("aria-invalid", "true");
+    bad = $("eAmount");
+  }
+  if (!date && !editingRule) { fieldError("eDateErr", t("dateNeeded")); bad ||= $("eDate"); }
+  if (bad) { bad.focus(); return; }
   const note = $("eNote").value.trim();
+  if (entryKind === "loan") { submitLoan({ amount, date, note }); return; }
   const category = $("eCatGrid").querySelector("input:checked")?.value || categories[0];
   const repeat = !editing && entryKind !== "planned" && $("eRepeat").checked;
   if (editing) { saveEdit({ amount, date, note, category }); return; }
@@ -798,77 +996,30 @@ function saveEdit({ amount, date, note, category }) {
   } });
 }
 
-// ===== Loan sheet (one "gave" or "got" entry with a person; add or edit) =====
-// Set while the sheet is open: { personId, txn }. personId is fixed when opened from a person (or editing);
-// otherwise the person comes from the name field, matched case-insensitively, and is created if new.
-let loanCtx = null;
-const loanDir = () => document.querySelector('input[name="loanDir"]:checked')?.value || "gave";
-
-function openLoanSheet({ personId = null, dir = null, txn = null } = {}) {
-  if (!user) return;
-  closeMenu(false);
-  const st = loanState();
-  if (txn) personId = txn.personId;
-  const entry = personId ? st.byId.get(personId) : null;
-  if (!entry) personId = null;
-  loanCtx = { personId, txn };
-  const balance = entry?.balance || 0;
-  const chosen = txn?.dir || dir || (balance > 0 ? "got" : "gave");
-  document.querySelector(`input[name="loanDir"][value="${chosen}"]`).checked = true;
-  // Tapping the button that settles up pre-fills the outstanding amount (selected, so typing replaces it)
-  const settles = !txn && dir && (dir === "got" ? balance > 0 : balance < 0);
-  $("lAmount").value = txn ? plainFmt.format(txn.amount) : settles ? plainFmt.format(Math.abs(balance)) : "";
-  $("lPerson").value = entry ? entry.person.name : "";
-  $("lPerson").readOnly = !!entry;
-  $("peopleNames").replaceChildren(...st.entries.map(e => h("option", { value: e.person.name })));
-  $("lDate").value = txn ? txn.date : todayISO();
-  $("lNote").value = txn?.note || "";
-  $("loanTitle").textContent = t(txn ? "editLoan" : "newLoan");
-  $("loanSubmit").textContent = t(txn ? "saveChanges" : "save");
-  updateLoanPreview();
-  openDialog($("loanDialog"));
-  $("lAmount").focus();
-  if ($("lAmount").value) $("lAmount").select();
-}
-
-// Live "After this: Rahim owes you ৳3,000" under the fields
-function updateLoanPreview() {
-  if (!loanCtx) return;
-  const dir = loanDir(), amount = parseNum($("lAmount").value), st = loanState();
-  $("lDirHint").textContent = t(dir === "gave" ? "dirHintGave" : "dirHintGot");
-  const person = loanCtx.personId ? st.byId.get(loanCtx.personId)?.person : findPerson(people, $("lPerson").value);
-  const name = person ? person.name : cleanName($("lPerson").value);
-  if (!name || !(amount > 0)) { $("lPreview").textContent = ""; return; }
-  const next = balanceWith(person ? st.byId.get(person.id)?.balance || 0 : 0, { dir, amount }, loanCtx.txn);
-  $("lPreview").textContent = t("previewAfter", { status: statusText(name, next) });
-}
-
-function submitLoan() {
-  if ("leaving" in $("loanDialog").dataset) return;
-  const amount = parseNum($("lAmount").value);
-  if (!(amount > 0)) { toast(t("invalidAmount"), { error: true }); $("lAmount").focus(); return; }
-  const date = $("lDate").value;
-  if (!date) { $("lDate").focus(); return; }
-  const dir = loanDir(), note = $("lNote").value.trim(), { txn } = loanCtx;
-  let person = loanCtx.personId ? people.find(p => p.id === loanCtx.personId) : null;
-  if (txn && !person) { closeDialog($("loanDialog")); toast(t("personGone"), { error: true }); return; } // deleted elsewhere meanwhile
-  const typed = cleanName($("lPerson").value);
-  if (!person && !typed) { toast(t("needName"), { error: true }); $("lPerson").focus(); return; }
-  person ||= findPerson(people, typed);
+// A loan entry: "gave" or "got" with a person. A new name creates the person, in the same batch as the entry.
+// Editing can move the entry to another existing person.
+function submitLoan({ amount, date, note }) {
+  const dir = loanDir(), txn = editing?.col === "loanTxns" ? editing.item : null;
+  const { person, typed, isNew } = sheetPerson();
+  if (!person && !typed) {
+    fieldError("ePersonErr", t(isNew ? "needName" : "pickPerson"));
+    (isNew ? $("ePersonNew") : $("ePeople").querySelector("input"))?.focus();
+    return;
+  }
+  if (txn && !person) { closeDialog($("entryDialog")); toast(t("personGone"), { error: true }); return; } // deleted elsewhere meanwhile
   const name = person ? person.name : typed; // an existing person keeps their spelling, whatever was typed
-  closeDialog($("loanDialog"));
+  closeDialog($("entryDialog"));
   const uid = user.uid;
 
   if (txn) {
     const { id, ...before } = txn;
-    const changes = { dir, amount, date, note };
+    const changes = { dir, amount, date, note, personId: person.id };
     if (Object.keys(changes).every(k => changes[k] === (before[k] ?? (k === "note" ? "" : undefined)))) return;
     const ref = doc(db, "users", uid, "loanTxns", id);
     writeInBackground(updateDoc(ref, changes));
     toast(t("entryUpdated"), { actionLabel: t("undo"), onAction: () => { writeInBackground(setDoc(ref, before)); toast(t("restored")); } });
     return;
   }
-  // A new person and their first entry go in one batch, so neither can exist without the other
   const prev = person ? loanState().byId.get(person.id)?.balance || 0 : 0;
   const ops = [];
   let pid = person?.id;
@@ -882,11 +1033,6 @@ function submitLoan() {
   writeAll(ops);
   toast(t("savedStatus", { status: statusText(name, balanceWith(prev, { dir, amount })) }));
 }
-$("loanCancel").onclick = () => closeDialog($("loanDialog"));
-$("loanDialog").addEventListener("click", e => { if (e.target === e.currentTarget) closeDialog(e.currentTarget); });
-$("loanForm").addEventListener("submit", e => { e.preventDefault(); guard(submitLoan)(); });
-["lAmount", "lPerson"].forEach(id => $(id).addEventListener("input", updateLoanPreview));
-document.querySelectorAll('input[name="loanDir"]').forEach(r => r.addEventListener("change", updateLoanPreview));
 
 function openRename(person) {
   const d = $("nameDialog"), input = $("nameInput");
@@ -956,7 +1102,7 @@ function init() {
     stopListeners();
     closeMenu(false);
     // The account changed under them, so they go at once rather than animating over the new state
-    ["entryDialog", "cycleDialog", "accountDialog", "loanDialog", "nameDialog"].forEach(id => closeDialog($(id), { instant: true }));
+    ["entryDialog", "cycleDialog", "accountDialog", "nameDialog"].forEach(id => closeDialog($(id), { instant: true }));
     if (u) {
       document.body.dataset.auth = "in";
       subscribeAll();
@@ -1632,6 +1778,7 @@ function budgetEditRow(c, idx) {
   const name = catLabel(c);
   const input = h("input", { id: "b-" + idx, class: "num", inputmode: "decimal", autocomplete: "off", placeholder: t("noLimitPh") });
   input.value = budgetText(c);
+  bindAmountInput(input);
   input.addEventListener("change", guard(() => saveBudget(c, input)));
   input.addEventListener("keydown", e => { if (e.key === "Enter") input.blur(); });
   return h("div", { class: "brow edit" },
