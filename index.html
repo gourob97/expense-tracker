@@ -85,7 +85,7 @@ try {
         <span class="nav-icon"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3a9 9 0 1 0 9 9h-9z"/><path d="M15 2.5A9 9 0 0 1 21.5 9H15z"/></svg><span class="alert" id="badge-budgets"></span></span>
         <span class="nav-label" data-i18n="tabBudgets">Budgets</span>
       </a>
-      <!-- Tablet/desktop only; on phones Loans opens from the summary card (the bottom bar is full) -->
+      <!-- On phones the bar has room for five slots, so Income is hidden there and opens from the Expenses/Income switch -->
       <a class="nav-item" href="#/loans" data-tab="loans">
         <span class="nav-icon"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 8h14l-4-4"/><path d="M20 16H6l4 4"/></svg></span>
         <span class="nav-label" data-i18n="tabLoans">Loans</span><span class="count" id="badge-loans"></span>
@@ -132,11 +132,11 @@ try {
           <div class="hero-breakdown" id="leftSub"></div>
         </div>
         <div class="kpis">
-          <div class="kpi">
+          <a class="kpi kpi-link" href="#/income">
             <div class="label" data-i18n="statIncome">Income</div>
             <div class="kpi-value num" id="incomeTotal">৳0</div>
             <div class="kpi-sub" id="incomeSub"></div>
-          </div>
+          </a>
           <div class="kpi">
             <div class="label"><span class="key spent" aria-hidden="true"></span><span data-i18n="statSpent">Spent</span></div>
             <div class="kpi-value num" id="total">৳0</div>
@@ -148,13 +148,13 @@ try {
             <div class="kpi-sub" id="plannedSub"></div>
           </div>
         </div>
-        <a class="loans-link" id="loansLink" href="#/loans">
-          <span class="loans-link-icon" aria-hidden="true"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 8h14l-4-4"/><path d="M20 16H6l4 4"/></svg></span>
-          <span class="loans-link-title" data-i18n="tabLoans">Loans</span>
-          <span class="loans-link-sub" id="loansLinkSub"></span>
-          <svg class="loans-link-chev" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 6l6 6-6 6"/></svg>
-        </a>
       </section>
+
+      <!-- Phones only: Income shares the Expenses slot in the bottom bar -->
+      <nav class="flow-switch" id="flowSwitch" aria-label="Expenses or income" data-i18n-aria="flowLabel">
+        <a href="#/expenses" data-tab="expenses" data-i18n="tabExpenses">Expenses</a>
+        <a href="#/income" data-tab="income" data-i18n="tabIncome">Income</a>
+      </nav>
 
       <!-- Expenses -->
       <div class="tab-panel cols" data-panel="expenses">

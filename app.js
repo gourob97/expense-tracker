@@ -356,7 +356,7 @@ function showTab(name) {
   currentTab = name;
   document.body.dataset.tab = name;
   document.querySelectorAll(".tab-panel").forEach(p => { p.hidden = p.dataset.panel !== name; });
-  document.querySelectorAll(".nav-item").forEach(a => {
+  document.querySelectorAll(".nav-item, .flow-switch a").forEach(a => {
     if (a.dataset.tab === name) a.setAttribute("aria-current", "page"); else a.removeAttribute("aria-current");
   });
   $("pageTitle").textContent = t(TAB_TITLE[name]);
@@ -1426,12 +1426,6 @@ function renderSummary(animate) {
     ? t("kpiSpentSub", { pct: fmtInt(Math.round(spent / earned * 100)), n: fmtInt(expenses.length) })
     : t("entries", { n: fmtInt(expenses.length) });
   $("plannedSub").textContent = t("kpiPlannedSub", { n: fmtInt(planned.length) });
-
-  // Phone entry point to Loans (tablet and desktop have it in the nav)
-  const lt = loanState().totals;
-  $("loansLinkSub").textContent = lt.owedToYou || lt.youOwe
-    ? [lt.owedToYou ? t("linkToGet", { amt: fmt(lt.owedToYou) }) : null, lt.youOwe ? t("linkToGive", { amt: fmt(lt.youOwe) }) : null].filter(Boolean).join(" · ")
-    : t("loansLinkEmpty");
 }
 
 function renderBadges() {

@@ -216,18 +216,33 @@ main { overflow-x: clip }
 .kpi-value { font-size: 16px; font-weight: 600; margin-top: 2px; overflow-wrap: anywhere }
 .kpi-sub { display: none; font-size: 12px; color: var(--muted) }
 @media (max-width: 599px) { body[data-tab="budgets"] .summary { display: none } }
-/* Phone-only way into Loans: the bottom bar has no room for a fifth tab */
-.loans-link {
-  display: flex; align-items: center; gap: 10px; min-height: 48px; margin: -4px -8px -8px; padding: 6px 8px;
-  border-top: 1px solid var(--line); border-radius: 0 0 var(--r-md) var(--r-md); color: var(--text); text-decoration: none; font-size: 14px
+/* The Income figure opens the Income list */
+.kpi-link { display: block; color: inherit; text-decoration: none; border-radius: var(--r-md) }
+.kpi-link:active { background: var(--surface-2) }
+
+/* Phones: the bottom bar has five slots, so Income shares the Expenses slot and opens from this switch.
+   Order: Expenses, Planned, +, Loans, Budgets; Expenses stays highlighted on Income. */
+.flow-switch { display: none }
+@media (max-width: 599px) {
+  .nav-item[data-tab="income"] { display: none }
+  .nav-item[data-tab="expenses"] { order: 1 }
+  .nav-item[data-tab="planned"] { order: 2 }
+  .fab { order: 3 }
+  .nav-item[data-tab="loans"] { order: 4 }
+  .nav-item[data-tab="budgets"] { order: 5 }
+  body[data-tab="income"] .nav-item[data-tab="expenses"] { color: var(--accent-text); font-weight: 600 }
+
+  body[data-tab="expenses"] .flow-switch, body[data-tab="income"] .flow-switch {
+    display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 4px; padding: 4px; background: var(--sunken); border-radius: 12px
+  }
+  .flow-switch a {
+    display: flex; align-items: center; justify-content: center; height: 40px; border-radius: 9px;
+    font-size: 14px; font-weight: 500; color: var(--muted); text-decoration: none; transition: color var(--dur-fast)
+  }
+  .flow-switch a[aria-current="page"] { background: var(--surface-2); color: var(--text); font-weight: 600; box-shadow: 0 1px 2px rgba(0, 0, 0, .15) }
+  :root[data-theme="light"] .flow-switch a[aria-current="page"] { background: var(--surface) }
+  .flow-switch a:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px }
 }
-.loans-link:active { background: var(--surface-2) }
-.loans-link-icon { flex: 0 0 auto; width: 30px; height: 30px; border-radius: 9px; display: inline-flex; align-items: center; justify-content: center; background: var(--surface-2); color: var(--muted) }
-.loans-link-title { font-weight: 600 }
-.loans-link-sub { flex: 1; min-width: 0; text-align: right; color: var(--muted); font-size: 13px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis }
-.loans-link-chev { flex: 0 0 auto; color: var(--muted) }
-@media (min-width: 600px) { .loans-link { display: none } }
-@media (max-width: 599px) { .nav-item[data-tab="loans"] { display: none } }
 
 /* ===== Panels ===== */
 .cols { display: flex; flex-direction: column; gap: 14px }
