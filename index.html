@@ -359,7 +359,7 @@ try { if (localStorage.getItem("signedIn") === "1") { document.body.dataset.auth
     <p class="field-error" id="eAmountErr" hidden></p>
 
     <fieldset class="chip-field" id="eCatField">
-      <legend data-i18n="category">Category</legend>
+      <legend class="chip-legend"><span data-i18n="category">Category</span><button type="button" class="text-btn legend-btn" id="eCatEdit" data-i18n="editCats">Edit</button></legend>
       <div class="chip-row" id="eCatGrid"></div>
     </fieldset>
 
@@ -417,6 +417,47 @@ try { if (localStorage.getItem("signedIn") === "1") { document.body.dataset.auth
   </form>
 </dialog>
 
+<!-- Categories: the list (a sheet), and the editor for one (name, icon, colour, or delete and move its entries) -->
+<dialog id="catsDialog" class="sheet" aria-labelledby="catsTitle">
+  <div class="cats-inner">
+    <div class="grabber" aria-hidden="true"></div>
+    <div class="sheet-head">
+      <span></span>
+      <h2 id="catsTitle" data-i18n="categories">Categories</h2>
+      <button type="button" class="text-btn done-btn" id="catsDone" data-i18n="done">Done</button>
+    </div>
+    <div class="cats-list" id="catsList"></div>
+    <button type="button" class="btn secondary block" id="catsAdd"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M12 5v14"/><path d="M5 12h14"/></svg><span data-i18n="newCatTitle">New category</span></button>
+    <p class="hint" data-i18n="catsHint">Renaming a category updates your past entries too.</p>
+  </div>
+</dialog>
+
+<dialog id="catDialog" class="confirm cat-dialog" aria-labelledby="catTitle">
+  <form id="catForm" novalidate>
+    <h2 id="catTitle" class="dialog-title" data-i18n="newCatTitle">New category</h2>
+    <div id="catMain" class="cat-main">
+      <div class="cat-name-row">
+        <span id="catPreview" aria-hidden="true"></span>
+        <input type="text" class="input" id="catName" maxlength="30" autocomplete="off" aria-labelledby="catTitle" aria-describedby="catNameErr" placeholder="Category name" data-i18n-ph="catNamePh">
+      </div>
+      <p class="field-error" id="catNameErr" hidden></p>
+      <fieldset class="cat-pick"><legend data-i18n="catIconLabel">Icon</legend><div class="icon-grid" id="catIcons"></div></fieldset>
+      <fieldset class="cat-pick"><legend data-i18n="catColourLabel">Colour</legend><div class="tone-row" id="catTones"></div></fieldset>
+    </div>
+    <div id="catDelBox" class="cat-del" hidden>
+      <p id="catDelMsg"></p>
+      <label class="field-row"><span data-i18n="catMoveTo">Move its entries to</span><select id="catMoveTo"></select></label>
+      <p class="hint" data-i18n="catDeleteHint">Its expenses, planned costs and repeats, in every month, move there. Its budget is removed.</p>
+    </div>
+    <div class="btn-row">
+      <button type="button" class="text-btn danger-link" id="catDelete" data-i18n="deleteCat">Delete</button>
+      <span class="btn-spacer"></span>
+      <button type="button" class="btn secondary" id="catCancel" data-i18n="cancel">Cancel</button>
+      <button type="submit" class="btn primary" id="catSave" data-i18n="save">Save</button>
+    </div>
+  </form>
+</dialog>
+
 <dialog id="confirmDialog" class="confirm" aria-describedby="confirmMsg">
   <p id="confirmMsg"></p>
   <div class="btn-row end">
@@ -465,6 +506,11 @@ try { if (localStorage.getItem("signedIn") === "1") { document.body.dataset.auth
           <label><input type="radio" name="langPref" value="bn"><span lang="bn">বাংলা</span></label>
         </div>
       </div>
+      <button type="button" class="acct-row acct-btn when-in" id="acctCats">
+        <span class="acct-label"><span data-icon="tag"></span><span data-i18n="categories">Categories</span></span>
+        <span class="acct-value" id="acctCatsVal"></span>
+        <span data-icon="chevron" class="acct-chev"></span>
+      </button>
       <button type="button" class="acct-row acct-btn when-in" id="acctCycle">
         <span class="acct-label"><span data-icon="calendar"></span><span data-i18n="cycleRow">Month starts on</span></span>
         <span class="acct-value" id="acctCycleVal"></span>
@@ -488,7 +534,8 @@ try { if (localStorage.getItem("signedIn") === "1") { document.body.dataset.auth
 
 <div id="menu" class="menu" role="menu" hidden></div>
 
-<div id="toast" class="toast" role="status" aria-live="polite" hidden>
+<!-- A manual popover, so a toast (and its Undo) shows above any open dialog, not behind it -->
+<div id="toast" class="toast" role="status" aria-live="polite" popover="manual" hidden>
   <span id="toastMsg"></span>
   <button type="button" class="toast-action" id="toastAction" hidden></button>
 </div>

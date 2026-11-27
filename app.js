@@ -83,6 +83,13 @@ const ICONS = {
   fun: '<rect x="3" y="5" width="18" height="14" rx="2"/><path d="M10 9l5 3-5 3z"/>',
   other: '<circle cx="6" cy="12" r="1.2" fill="currentColor"/><circle cx="12" cy="12" r="1.2" fill="currentColor"/><circle cx="18" cy="12" r="1.2" fill="currentColor"/>',
   tag: '<path d="M3 12V4h8l10 10-8 8z"/><circle cx="7.5" cy="8.5" r="1.3"/>',
+  gift: '<rect x="3" y="9" width="18" height="12" rx="2"/><path d="M12 9v12"/><path d="M3 13h18"/><path d="M12 9C10 5.5 6.5 5.5 6.5 7.5S10 9 12 9z"/><path d="M12 9c2-3.5 5.5-3.5 5.5-1.5S14 9 12 9z"/>',
+  book: '<path d="M4 5a2 2 0 0 1 2-2h13v15H6a2 2 0 0 0-2 2z"/><path d="M4 20a2 2 0 0 0 2 1h13v-3"/>',
+  phone: '<rect x="7" y="2" width="10" height="20" rx="2.5"/><path d="M11 18h2"/>',
+  plane: '<path d="M22 2L11 13"/><path d="M22 2l-7 20-4-9-9-4z"/>',
+  coffee: '<path d="M4 9h13v5a5 5 0 0 1-5 5H9a5 5 0 0 1-5-5z"/><path d="M17 11h1.5a2.5 2.5 0 0 1 0 5H17"/><path d="M8 3v3M12 3v3"/>',
+  paw: '<circle cx="5.5" cy="10.5" r="1.8"/><circle cx="9" cy="6" r="1.8"/><circle cx="15" cy="6" r="1.8"/><circle cx="18.5" cy="10.5" r="1.8"/><path d="M12 12.5c-2.8 0-5 3.2-5 5.5 0 1.4 1.1 2.3 2.4 2.3 1.1 0 1.6-.6 2.6-.6s1.5.6 2.6.6c1.3 0 2.4-.9 2.4-2.3 0-2.3-2.2-5.5-5-5.5z"/>',
+  dumbbell: '<path d="M6.5 7v10M3.5 9.5v5M17.5 7v10M20.5 9.5v5M6.5 12h11"/>',
   income: '<path d="M12 3v12"/><path d="M7 10l5 5 5-5"/><path d="M4 17v3h16v-3"/>',
   repeat: '<path d="M17 2l3 3-3 3"/><path d="M4 11V9a4 4 0 0 1 4-4h16"/><path d="M7 22l-3-3 3-3"/><path d="M20 13v2a4 4 0 0 1-4 4H4"/>',
   more: '<circle cx="6" cy="12" r="1.4" fill="currentColor"/><circle cx="12" cy="12" r="1.4" fill="currentColor"/><circle cx="18" cy="12" r="1.4" fill="currentColor"/>',
@@ -128,7 +135,12 @@ function h(tag, props = {}, ...children) {
 // ----- Categories: built-ins get a fixed tone and icon; custom ones get a stable tone from their name -----
 const CAT_STYLE = { Food: [0, "food"], Transport: [1, "transport"], Bills: [2, "bills"], Rent: [3, "rent"], Shopping: [4, "shopping"], Health: [5, "health"], Entertainment: [6, "fun"], Other: [7, "other"] };
 const hashStr = s => [...String(s)].reduce((acc, ch) => (acc * 31 + ch.codePointAt(0)) >>> 0, 7);
-const catStyle = c => CAT_STYLE[c] ? { tone: CAT_STYLE[c][0], icon: CAT_STYLE[c][1] } : { tone: hashStr(c) % 8, icon: "tag" };
+// Icons a category can pick, and its chosen look (settings/categories.styles[name] = { icon, tone }) over the default
+const CAT_ICONS = ["food", "transport", "bills", "rent", "shopping", "health", "fun", "gift", "book", "phone", "plane", "coffee", "paw", "dumbbell", "tag", "other"];
+let catStyles = {};
+const validStyle = v => !!v && CAT_ICONS.includes(v.icon) && Number.isInteger(v.tone) && v.tone >= 0 && v.tone < 8;
+const catStyle = c => validStyle(catStyles[c]) ? { tone: catStyles[c].tone, icon: catStyles[c].icon }
+  : CAT_STYLE[c] ? { tone: CAT_STYLE[c][0], icon: CAT_STYLE[c][1] } : { tone: hashStr(c) % 8, icon: "tag" };
 const catIcon = (c, cls = "") => { const s = catStyle(c); return h("span", { class: `cat-icon tone-${s.tone} ${cls}` }, svg(s.icon, cls ? 18 : 20)); };
 
 // ----- Language & formatting -----
@@ -215,7 +227,16 @@ bindAmountInput($("eAmount"));
 let toastTimer;
 function hideToast() {
   const el = $("toast");
-  if (!el.hidden) playExit(el, () => { el.hidden = true; });
+  if (!el.hidden) playExit(el, () => { el.hidden = true; try { el.hidePopover?.(); } catch (e) { /* already closed */ } });
+}
+// Inside the topmost open dialog (so its Undo can be tapped), else the page; shown again as a popover each time
+// so it sits above everything, including a dialog opened since the last toast
+function raiseToast(el) {
+  const host = [...openDialogs].reverse().find(d => d.open && !("leaving" in d.dataset)) || document.body;
+  const wasOpen = el.matches?.(":popover-open");
+  if (el.parentElement !== host) { if (wasOpen) try { el.hidePopover(); } catch (e) {} host.append(el); }
+  if (!el.showPopover) return; // no popover support: still inside the dialog, so it shows and works
+  try { if (el.matches(":popover-open")) el.hidePopover(); el.showPopover(); } catch (e) { /* not connected */ }
 }
 function toast(msg, { error = false, actionLabel, onAction } = {}) {
   const el = $("toast"), btn = $("toastAction");
@@ -227,22 +248,33 @@ function toast(msg, { error = false, actionLabel, onAction } = {}) {
   btn.hidden = !actionLabel;
   if (actionLabel) { btn.textContent = actionLabel; btn.onclick = () => { toast(""); onAction(); }; }
   el.hidden = false;
+  raiseToast(el);
   if (!error) toastTimer = setTimeout(hideToast, actionLabel ? 6000 : 3500);
 }
 
 // ----- Dialogs: open and close through these so closing plays the exit animation first -----
+// Open modal dialogs, oldest first. A modal makes everything outside it inert, so the toast lives inside the
+// topmost one while it shows (see raiseToast) and moves out again when that dialog closes.
+const openDialogs = [];
 function openDialog(d) {
+  const i = openDialogs.indexOf(d);
+  if (i >= 0) openDialogs.splice(i, 1);
+  openDialogs.push(d);
   if (cancelExit(d) || d.open) return; // reopened mid-exit: it never closed, so stopping the exit is enough
   d.showModal();
 }
 function closeDialog(d, { instant = false } = {}) {
   if (!d.open) return;
+  const i = openDialogs.indexOf(d);
+  if (i >= 0) openDialogs.splice(i, 1);
+  const tst = $("toast");
+  if (!tst.hidden && d.contains(tst)) raiseToast(tst); // keep it on screen as its dialog goes
   if (instant) { cancelExit(d); d.close(); return; }
   playExit(d, () => d.close());
 }
 // Esc (and Android back) animate out too. If the browser won't allow the close to be deferred, it closes at once.
 // The confirm dialog handles cancel itself, since it has to resolve its promise.
-["entryDialog", "cycleDialog", "accountDialog", "nameDialog"].forEach(id => $(id).addEventListener("cancel", e => {
+["entryDialog", "cycleDialog", "accountDialog", "nameDialog", "catDialog", "catsDialog"].forEach(id => $(id).addEventListener("cancel", e => {
   if (!e.cancelable) return;
   e.preventDefault();
   closeDialog(e.currentTarget);
@@ -480,6 +512,7 @@ function renderAccount() {
   $("acctEmail").hidden = !email;
   document.querySelectorAll("[data-avatar]").forEach(fillAvatar);
   $("acctCycleVal").textContent = t("cycleValue", { day: fmtInt(startDay) });
+  $("acctCatsVal").textContent = fmtInt(categories.length);
   showSync(syncShown); // refreshes the text in the current language
 }
 
@@ -780,7 +813,8 @@ function buildCatGrid(select) {
     return h("label", { class: "chip-opt" },
       h("input", { type: "radio", name: "cat", value: c, checked: (prev ? prev === c : i === 0) || null }),
       h("span", { class: "chip-face" }, h("span", { class: `cat-icon xs tone-${s.tone}` }, svg(s.icon, 16)), h("span", { text: catLabel(c) })));
-  }));
+  }), h("button", { type: "button", class: "chip-opt new-chip", onclick: () => openCatEditor(null, { onSaved: name => buildCatGrid(name) }) },
+    h("span", { class: "chip-face" }, svg("plus", 16), h("span", { text: t("newCat") }))));
   if (!grid.querySelector("input:checked")) grid.querySelector("input")?.click();
 }
 const checkCategory = c => { const r = [...$("eCatGrid").querySelectorAll("input")].find(i => i.value === c); if (r) r.checked = true; };
@@ -1162,7 +1196,7 @@ function init() {
     stopListeners();
     closeMenu(false);
     // The account changed under them, so they go at once rather than animating over the new state
-    ["entryDialog", "cycleDialog", "accountDialog", "nameDialog"].forEach(id => closeDialog($(id), { instant: true }));
+    ["entryDialog", "cycleDialog", "accountDialog", "nameDialog", "catDialog", "catsDialog"].forEach(id => closeDialog($(id), { instant: true }));
     if (u) {
       document.body.dataset.auth = "in";
       startBooting();
@@ -1175,7 +1209,7 @@ function init() {
       queuedFromBefore = false;
       expenses = []; income = []; planned = []; budgets = {}; recurring = []; recurringIncome = [];
       people = []; loans = []; loanPayments = [];
-      categories = [...DEFAULT_CATEGORIES];
+      categories = [...DEFAULT_CATEGORIES]; catStyles = {};
       editingBudgets = false;
       applyStartDay(DEFAULT_START_DAY);
     }
@@ -1196,7 +1230,10 @@ function subscribeAll() {
   subscribeMonth();
   unsubs.push(onSnapshot(userDoc("settings", "categories"), s => {
     categories = s.exists() && Array.isArray(s.data().list) ? s.data().list : [...DEFAULT_CATEGORIES];
+    catStyles = s.exists() && s.data().styles && typeof s.data().styles === "object" ? s.data().styles : {};
     renderAll();
+    if ($("catsDialog").open) renderCatsManager();
+    if ($("entryDialog").open && usesCategory(entryKind)) buildCatGrid(); // keeps the chosen one; picks up renames and looks
   }, onErr));
   unsubs.push(onSnapshot(userDoc("settings", "budgets"), s => {
     budgets = s.exists() ? s.data() : {};
@@ -1503,10 +1540,10 @@ function renderSummary(animate) {
   setAmount($("incomeTotal"), earned, fmt, animate);
   setAmount($("total"), spent, fmt, animate);
   setAmount($("planned"), plannedTotal, fmt, animate);
-  $("incomeSub").textContent = t("entries", { n: fmtInt(income.length) });
+  $("incomeSub").textContent = plural(income.length, "oneEntry", "entries");
   $("spentSub").textContent = earned > 0
     ? t("kpiSpentSub", { pct: fmtInt(Math.round(spent / earned * 100)), n: fmtInt(expenses.length) })
-    : t("entries", { n: fmtInt(expenses.length) });
+    : plural(expenses.length, "oneEntry", "entries");
   $("plannedSub").textContent = t("kpiPlannedSub", { n: fmtInt(planned.length) });
 }
 
@@ -1634,12 +1671,12 @@ function renderLists(animate = false) {
   renderFilterChips();
   const filtering = Boolean(filterCat || searchQ);
   const exp = expenses.filter(e => (!filterCat || e.category === filterCat) && matchesSearch(e.note, catLabel(e.category), e.category));
-  $("expCount").textContent = t("entries", { n: fmtInt(exp.length) });
+  $("expCount").textContent = plural(exp.length, "oneEntry", "entries");
   renderGrouped("list", exp, expenseRow, filtering ? { msg: t("noMatches") }
     : { msg: t("noExpenses"), actionLabel: t("addExpense"), onAction: () => openEntry("expense") });
 
   const inc = income.filter(i => matchesSearch(i.note, t("income")));
-  $("incCount").textContent = t("entries", { n: fmtInt(inc.length) });
+  $("incCount").textContent = plural(inc.length, "oneEntry", "entries");
   renderGrouped("incomeList", inc, incomeRow, searchQ ? { msg: t("noMatches") }
     : { msg: t("noIncome"), actionLabel: t("addIncome"), onAction: () => openEntry("income") });
 
@@ -1837,7 +1874,8 @@ function renderBudgets() {
       return;
     }
     budgetEditKey = key;
-    list.replaceChildren(...categories.map(budgetEditRow), addCategoryForm());
+    list.replaceChildren(...categories.map(budgetEditRow),
+      h("div", { class: "add-cat" }, h("button", { type: "button", class: "btn secondary", onclick: () => openCatsManager() }, svg("tag", 18), t("manageCats"))));
     return;
   }
   budgetEditKey = "";
@@ -1878,14 +1916,7 @@ function budgetEditRow(c, idx) {
   return h("div", { class: "brow edit" },
     catIcon(c, "sm"),
     h("label", { class: "brow-name", for: "b-" + idx, text: name }),
-    h("span", { class: "budget-input" }, h("span", { "aria-hidden": "true", text: "৳" }), input),
-    h("button", { type: "button", class: "icon-btn", "aria-label": t("removeCatNamed", { name }), onclick: guard(() => removeCategory(c)) }, svg("x", 18)));
-}
-
-function addCategoryForm() {
-  const input = h("input", { class: "input", type: "text", maxlength: "30", placeholder: t("phNewCat"), "aria-label": t("phNewCat") });
-  return h("form", { class: "add-cat", onsubmit: e => { e.preventDefault(); guard(() => addCategory(input))(); } },
-    input, h("button", { type: "submit", class: "btn secondary" }, svg("plus", 18), t("add")));
+    h("span", { class: "budget-input" }, h("span", { "aria-hidden": "true", text: "৳" }), input));
 }
 
 function startBudgetEdit(c) {
@@ -2110,31 +2141,162 @@ function saveBudget(c, input) {
   toast(t("budgetSaved"));
 }
 
-function addCategory(input) {
-  const name = input.value.trim();
-  if (!name) return;
-  // Match against both the stored name and its Bangla label, so "খাবার" can't duplicate "Food"
-  const lower = name.toLowerCase();
-  if (categories.some(c => c.toLowerCase() === lower || CAT_BN[c] === name)) { toast(t("catExists", { name }), { error: true }); return; }
-  writeInBackground(setDoc(userDoc("settings", "categories"), { list: [...categories, name] }));
-  input.value = "";
+// ===== Categories: create, rename, restyle, delete =====
+// settings/categories holds { list: [names, in order], styles: { name: { icon, tone } } }. Entries store the name,
+// so a rename or a delete rewrites every expense, planned cost and expense repeat that uses it (all months).
+const CAT_ENTRY_COLS = ["expenses", "planned", "recurring"];
+const catsRef = () => doc(db, "users", user.uid, "settings", "categories");
+const budgetsRef = () => doc(db, "users", user.uid, "settings", "budgets");
+const saveCats = (list, styles) => b => b.set(catsRef(), { list, styles });
+// Every entry in the category, read from the server (or the local cache when offline)
+async function entriesInCategory(name) {
+  const snaps = await Promise.all(CAT_ENTRY_COLS.map(col => getDocs(query(userCol(col), where("category", "==", name)))));
+  return snaps.flatMap((sn, i) => sn.docs.map(d => ({ col: CAT_ENTRY_COLS[i], id: d.id })));
+}
+const entryRef = e => doc(db, "users", user.uid, e.col, e.id);
+// Same name, ignoring case, or a built-in's Bangla label
+const catClash = (name, except) => categories.find(c => c !== except && (c.toLowerCase() === name.toLowerCase() || CAT_BN[c] === name));
+const usesThisMonth = c => [...expenses, ...planned].filter(e => e.category === c).length;
+
+// ----- Editor: name, icon and colour; also the way into deleting -----
+let catEdit = null; // { old: name | null, onSaved, mode: "edit" | "delete" }
+function openCatEditor(old, { onSaved = null } = {}) {
+  catEdit = { old, onSaved, mode: "edit" };
+  const st = old ? catStyle(old) : null;
+  // A new one starts on the least-used colour (the first such), so it stands apart from the rest
+  const uses = [0, 1, 2, 3, 4, 5, 6, 7].map(n => categories.filter(c => catStyle(c).tone === n).length);
+  const tone = st ? st.tone : uses.indexOf(Math.min(...uses.slice(0, 7))); // grey (7) is left for "Other"
+  $("catTitle").textContent = t(old ? "editCatTitle" : "newCatTitle");
+  $("catName").value = old ? catLabel(old) : "";
+  $("catIcons").replaceChildren(...CAT_ICONS.map(ic => h("label", { class: "icon-opt" },
+    h("input", { type: "radio", name: "catIcon", value: ic, checked: ic === (st ? st.icon : "tag") || null, "aria-label": ic }),
+    h("span", { class: "icon-face" }, svg(ic, 20)))));
+  $("catTones").replaceChildren(...[0, 1, 2, 3, 4, 5, 6, 7].map(n => h("label", { class: `tone-opt tone-${n}` },
+    h("input", { type: "radio", name: "catTone", value: n, checked: n === tone || null, "aria-label": t("colourN", { n: fmtInt(n + 1) }) }),
+    h("span", { class: "tone-face" }))));
+  setCatMode("edit");
+  fieldError("catNameErr", "");
+  syncCatPreview();
+  openDialog($("catDialog"));
+  if (!old) $("catName").focus();
+}
+const catPick = name => $("catDialog").querySelector(`input[name="${name}"]:checked`)?.value;
+// The big icon at the top, and the picked icon's highlight, follow the chosen icon and colour
+function syncCatPreview() {
+  const tone = Number(catPick("catTone") ?? 7), icon = catPick("catIcon") || "tag";
+  $("catPreview").replaceChildren(h("span", { class: `cat-icon tone-${tone}` }, svg(icon, 22)));
+  $("catIcons").className = `icon-grid tone-${tone}`;
+}
+function setCatMode(mode) {
+  catEdit.mode = mode;
+  const del = mode === "delete";
+  $("catMain").hidden = del;
+  $("catDelBox").hidden = !del;
+  $("catDelete").hidden = del || !catEdit.old;
+  $("catSave").textContent = t(del ? "delete" : "save");
+  $("catSave").classList.toggle("danger", del);
+  $("catSave").classList.toggle("primary", !del);
+  $("catCancel").textContent = t(del ? "back" : "cancel");
+  if (del) {
+    const old = catEdit.old, others = categories.filter(c => c !== old);
+    $("catDelMsg").textContent = t("catDeleteTitle", { name: catLabel(old) });
+    $("catMoveTo").replaceChildren(...others.map(c => h("option", { value: c, text: catLabel(c) })));
+    $("catMoveTo").value = others.includes("Other") ? "Other" : others[0] || "";
+  }
+}
+$("catDialog").addEventListener("change", e => { if (e.target.name === "catIcon" || e.target.name === "catTone") syncCatPreview(); });
+$("catName").addEventListener("input", () => fieldError("catNameErr", ""));
+$("catCancel").onclick = () => { if (catEdit?.mode === "delete") setCatMode("edit"); else closeDialog($("catDialog")); };
+$("catDelete").onclick = () => {
+  if (categories.length <= 1) { toast(t("keepOneCat"), { error: true }); return; }
+  setCatMode("delete");
+};
+$("catDialog").onclick = e => { if (e.target === $("catDialog")) closeDialog($("catDialog")); };
+$("catForm").onsubmit = e => {
+  e.preventDefault();
+  if (!catEdit || "leaving" in $("catDialog").dataset) return;
+  if (catEdit.mode === "delete") { guard(() => deleteCategory(catEdit.old, $("catMoveTo").value))(); return; }
+  const name = $("catName").value.trim().replace(/\s+/g, " ");
+  if (!name) { fieldError("catNameErr", t("catNeedName")); $("catName").focus(); return; }
+  if (catClash(name, catEdit.old)) { fieldError("catNameErr", t("catExists", { name })); $("catName").focus(); return; }
+  const style = { icon: catPick("catIcon") || "tag", tone: Number(catPick("catTone") ?? 7) };
+  const { old, onSaved } = catEdit;
+  closeDialog($("catDialog"));
+  guard(() => old ? saveCategory(old, name, style) : createCategory(name, style, onSaved))();
+};
+
+function createCategory(name, style, onSaved) {
+  const list = [...categories, name], styles = { ...catStyles, [name]: style };
+  writeAll([saveCats(list, styles)]);
+  categories = list; catStyles = styles; // shown at once; the snapshot that follows says the same
   toast(t("catAdded", { name }));
+  onSaved?.(name);
 }
 
-async function removeCategory(name) {
-  if (categories.length <= 1) { toast(t("keepOneCat"), { error: true }); return; }
-  if (!(await confirmAction(t("confirmRemoveCat", { name: catLabel(name) }), t("remove")))) return;
-  const uid = user.uid, index = categories.indexOf(name), prevBudget = budgets[name];
-  const catRef = doc(db, "users", uid, "settings", "categories"), budRef = doc(db, "users", uid, "settings", "budgets");
-  writeInBackground(setDoc(catRef, { list: categories.filter(c => c !== name) }));
-  if (prevBudget !== undefined) { const next = { ...budgets }; delete next[name]; writeInBackground(setDoc(budRef, next)); }
-  toast(t("catRemoved", { name: catLabel(name) }), { actionLabel: t("undo"), onAction: () => {
-    // Restore against the current state so edits made in between are kept
-    if (!categories.includes(name)) { const list = [...categories]; list.splice(Math.min(index, list.length), 0, name); writeInBackground(setDoc(catRef, { list })); }
-    if (prevBudget !== undefined) writeInBackground(setDoc(budRef, { ...budgets, [name]: prevBudget }));
+// Same name: only the look changes. New name: the list, its look, its budget and every entry move to it.
+async function saveCategory(old, name, style) {
+  if (name === old || name === catLabel(old)) {
+    writeAll([saveCats(categories, { ...catStyles, [old]: style })]);
+    toast(t("catSaved"));
+    return;
+  }
+  const entries = await entriesInCategory(old);
+  const styles = { ...catStyles, [name]: style };
+  delete styles[old];
+  const ops = [saveCats(categories.map(c => (c === old ? name : c)), styles)];
+  if (budgets[old] !== undefined) {
+    const next = { ...budgets, [name]: budgets[old] };
+    delete next[old];
+    ops.push(b => b.set(budgetsRef(), next));
+  }
+  entries.forEach(en => ops.push(b => b.update(entryRef(en), { category: name })));
+  writeAll(ops);
+  toast(t("catRenamed", { name, n: fmtInt(entries.length) }));
+}
+
+// Moves its entries to `target`, then removes it (with its look and budget). Undo puts all of it back.
+async function deleteCategory(name, target) {
+  if (categories.length <= 1 || !target || target === name) { toast(t("keepOneCat"), { error: true }); return; }
+  closeDialog($("catDialog"));
+  const entries = await entriesInCategory(name);
+  const index = categories.indexOf(name), prevStyle = catStyles[name], prevBudget = budgets[name];
+  const styles = { ...catStyles };
+  delete styles[name];
+  const ops = entries.map(en => b => b.update(entryRef(en), { category: target }));
+  ops.push(saveCats(categories.filter(c => c !== name), styles));
+  if (prevBudget !== undefined) { const next = { ...budgets }; delete next[name]; ops.push(b => b.set(budgetsRef(), next)); }
+  writeAll(ops);
+  toast(t("catDeleted", { name: catLabel(name), n: fmtInt(entries.length), to: catLabel(target) }), { actionLabel: t("undo"), onAction: () => {
+    // Restore against the current state, so changes made in between are kept
+    const list = categories.includes(name) ? [...categories] : [...categories.slice(0, index), name, ...categories.slice(index)];
+    const back = [saveCats(list, prevStyle ? { ...catStyles, [name]: prevStyle } : catStyles),
+      ...entries.map(en => b => b.update(entryRef(en), { category: name }))];
+    if (prevBudget !== undefined) back.push(b => b.set(budgetsRef(), { ...budgets, [name]: prevBudget }));
+    writeAll(back);
     toast(t("restored"));
   } });
 }
+
+// ----- Manager: every category with its use this month; tap one to edit it -----
+function openCatsManager() {
+  renderCatsManager();
+  openDialog($("catsDialog"));
+}
+function renderCatsManager() {
+  $("catsList").replaceChildren(...categories.map(c => {
+    const n = usesThisMonth(c);
+    return h("button", { type: "button", class: "cats-row", onclick: () => openCatEditor(c) },
+      catIcon(c, "sm"),
+      h("span", { class: "cats-text" }, h("span", { class: "cats-name", text: catLabel(c) }),
+        h("span", { class: "cats-sub", text: n ? t("catUses", { n: fmtInt(n) }) : t("catUnused") })),
+      h("span", { class: "row-chev" }, svg("chevron", 18)));
+  }));
+}
+$("catsDone").onclick = () => closeDialog($("catsDialog"));
+$("catsDialog").onclick = e => { if (e.target === $("catsDialog")) closeDialog($("catsDialog")); };
+$("catsAdd").onclick = () => openCatEditor(null);
+$("eCatEdit").onclick = () => openCatsManager();
+$("acctCats").onclick = () => { closeDialog($("accountDialog")); openCatsManager(); };
 
 // Creates one entry per recurring rule for the selected period, skipping any already created. Rules applied in this
 // session are remembered too, so a second tap before the banner re-renders can't create duplicates.

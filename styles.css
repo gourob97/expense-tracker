@@ -601,6 +601,9 @@ dialog.account-panel::backdrop { background: rgba(0, 0, 0, .55) }
   font-size: 14px; box-shadow: var(--shadow)
 }
 body:not([data-auth="in"]) .toast { bottom: 24px }
+/* Undo the browser's popover box (inset 0, margins, border) so the toast keeps its own place */
+.toast[popover] { inset: auto auto calc(var(--nav-h) + 16px + env(safe-area-inset-bottom)) 50%; margin: 0; border: 0; overflow: visible }
+body:not([data-auth="in"]) .toast[popover] { bottom: 24px }
 .toast.error { background: var(--danger); color: #fff }
 .toast-action { flex: 0 0 auto; min-height: 36px; padding: 0 12px; border: 0; border-radius: 9px; background: transparent; color: var(--accent); font-weight: 700; font-size: 14px }
 :root[data-theme="light"] .toast-action { color: #F0B429 }
@@ -763,6 +766,51 @@ dialog.confirm p { margin: 0 0 18px; font-size: 15px }
 
 /* Month start day dialog */
 .dialog-title { font-size: 17px; font-weight: 600; margin: 0 0 14px }
+
+/* ===== Categories ===== */
+/* Sheet: "Category" with an Edit link beside it, and a "+ New" chip after the categories */
+.chip-legend { display: flex; align-items: center; justify-content: space-between; width: 100% }
+.legend-btn { min-height: 32px; padding: 0 2px; font-size: 14px }
+#eCatGrid .new-chip { border: 0; background: transparent; padding: 0; color: inherit; font: inherit; cursor: pointer }
+#eCatGrid .new-chip .chip-face { min-height: 0; border-style: dashed; gap: 6px; padding-left: 10px; color: var(--muted) }
+#eCatGrid .new-chip:focus-visible .chip-face { outline: 2px solid var(--accent); outline-offset: 2px }
+/* Manager sheet */
+.cats-inner { display: flex; flex-direction: column; gap: 14px; padding: 8px 20px calc(16px + env(safe-area-inset-bottom)) }
+.sheet-head .done-btn { justify-self: end; padding-right: 0 }
+.cats-list { display: flex; flex-direction: column; border: 1px solid var(--line); border-radius: var(--r-lg); overflow: hidden }
+.cats-row { display: flex; align-items: center; gap: 12px; min-height: 60px; padding: 10px 12px 10px 14px; border: 0; border-top: 1px solid var(--line); background: transparent; color: var(--text); text-align: left; font: inherit; cursor: pointer }
+.cats-row:first-child { border-top: 0 }
+@media (hover: hover) { .cats-row:hover { background: var(--surface-2) } }
+.cats-row:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px }
+.cats-text { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px }
+.cats-name { font-size: 15px; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap }
+.cats-sub { font-size: 13px; color: var(--muted) }
+.cats-inner .hint { margin: 0; text-align: center }
+/* Editor */
+dialog.cat-dialog { width: min(400px, calc(100% - 32px)) }
+.cat-main, .cat-del { display: flex; flex-direction: column; gap: 14px; margin-bottom: 18px }
+.cat-main[hidden], .cat-del[hidden] { display: none }
+.cat-name-row { display: flex; align-items: center; gap: 10px }
+.cat-name-row .input { flex: 1; min-width: 0 }
+#catPreview .cat-icon { width: 44px; height: 44px; border-radius: 12px }
+#catNameErr { margin: -6px 0 0 }
+.cat-pick { border: 0; margin: 0; padding: 0; min-width: 0 }
+.cat-pick legend { padding: 0; margin-bottom: 8px; font-size: 13px; font-weight: 600; color: var(--muted) }
+.icon-grid { display: grid; grid-template-columns: repeat(8, minmax(0, 1fr)); gap: 6px }
+.tone-row { display: grid; grid-template-columns: repeat(8, minmax(0, 1fr)); gap: 6px }
+.icon-opt, .tone-opt { position: relative; display: flex; justify-content: center }
+.icon-opt input, .tone-opt input { position: absolute; inset: 0; width: 100%; height: 100%; margin: 0; opacity: 0; cursor: pointer }
+.icon-face { display: flex; align-items: center; justify-content: center; width: 100%; aspect-ratio: 1; max-width: 44px; border-radius: 10px; color: var(--muted); border: 1.5px solid transparent }
+.icon-opt input:checked + .icon-face { color: var(--cat); background: color-mix(in srgb, var(--cat) 16%, transparent); border-color: var(--cat) }
+.tone-face { width: 100%; aspect-ratio: 1; max-width: 32px; border-radius: 50%; background: var(--cat); box-shadow: 0 0 0 2px var(--surface), 0 0 0 2px transparent }
+.tone-opt input:checked + .tone-face { box-shadow: 0 0 0 2px var(--surface), 0 0 0 4px var(--text) }
+.icon-opt input:focus-visible + .icon-face, .tone-opt input:focus-visible + .tone-face { outline: 2px solid var(--accent); outline-offset: 2px }
+.cat-del p { margin: 0; font-size: 15px }
+.cat-del .hint { margin: 0; font-size: 13px }
+.cat-dialog .btn-row { align-items: center; flex-wrap: nowrap }
+.btn-spacer { flex: 1 }
+.danger-link { color: var(--danger); padding-left: 0; font-size: 15px }
+.danger-link[hidden] { display: none }
 .field-row select { flex: 1; min-width: 0; border: 0; background: transparent; font-size: 15px; font-weight: 500; text-align: right; text-align-last: right; padding: 8px 0; outline: none; cursor: pointer }
 .field-row:focus-within { box-shadow: inset 0 0 0 2px var(--accent) }
 .cycle-preview { margin: 14px 0 6px !important; font-weight: 600 }
