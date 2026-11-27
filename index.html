@@ -3,921 +3,284 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<title>Expense Tracker</title>
-<style>
-:root{--mono:ui-monospace,SFMono-Regular,Menlo,Consolas,"Kohinoor Bangla","Noto Sans Bengali","Nirmala UI",monospace;--bg:#0b0d10;--panel:#11141a;--line:#1e232b;--text:#d7dce4;--muted:#6b7480;--accent:#f0b429;--danger:#f87171;--ok:#4ade80;--input:#0b0d10;--accent-ink:#0b0d10}
-:root[data-theme="light"]{--bg:#f4f4f1;--panel:#ffffff;--line:#dcdcd6;--text:#1a1c20;--muted:#6f7275;--accent:#b7791f;--danger:#c53030;--ok:#2f855a;--input:#fbfbf9;--accent-ink:#ffffff}
-*{box-sizing:border-box}
-body{margin:0;font-family:ui-sans-serif,system-ui,-apple-system,"Segoe UI","Kohinoor Bangla","Noto Sans Bengali","Nirmala UI",sans-serif;background:var(--bg);color:var(--text);font-size:14px;line-height:1.4}
-.num,.mono{font-family:var(--mono);font-variant-numeric:tabular-nums}
-header{display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap;padding:max(14px,env(safe-area-inset-top)) max(20px,env(safe-area-inset-right)) 14px max(20px,env(safe-area-inset-left));border-bottom:1px solid var(--line)}
-#who{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-h1{font-size:13px;letter-spacing:.14em;text-transform:uppercase;margin:0;font-weight:600}
-h2{font-size:11px;letter-spacing:.12em;text-transform:uppercase;color:var(--muted);font-weight:600;margin:0 0 12px}
-main{max-width:1000px;margin:0 auto;padding:20px max(20px,env(safe-area-inset-right)) 20px max(20px,env(safe-area-inset-left));display:grid;gap:12px}
-.panel{background:var(--panel);border:1px solid var(--line);border-radius:4px;padding:16px}
-.grid{display:grid;gap:12px}
-@media(min-width:800px){.grid.two{grid-template-columns:1fr 1fr;align-items:start}}
-button{font:inherit;font-size:12px;letter-spacing:.04em;border:1px solid var(--accent);border-radius:3px;padding:7px 12px;background:var(--accent);color:var(--accent-ink);cursor:pointer}
-button.ghost{background:transparent;color:var(--text);border-color:var(--line)}
-button.danger{background:transparent;color:var(--danger);border-color:var(--danger)}
-button.small{padding:3px 8px;font-size:11px}
-input,select{font:inherit;font-size:13px;padding:7px 8px;border:1px solid var(--line);border-radius:3px;width:100%;background:var(--input);color:var(--text);min-width:0}
-input:focus,select:focus{outline:1px solid var(--accent);border-color:var(--accent)}
-.row{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
-.row>*{flex:1 1 120px}
-.row>button{flex:0 0 auto}
-.muted{color:var(--muted);font-size:12px}
-.stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:12px}
-.stat{min-width:0}
-.stat .v{font-size:clamp(16px,1.8vw,20px);font-weight:600;margin-top:4px;overflow-wrap:anywhere}
-.bar{height:4px;background:var(--line);margin-top:6px}
-.bar>div{height:100%;background:var(--accent)}
-.bar>div.over{background:var(--danger)}
-.item{display:flex;align-items:center;padding:9px 0;border-bottom:1px solid var(--line);gap:10px}
-.item:last-child{border-bottom:0}
-.item .info{flex:1 1 auto;min-width:0}
-.item .info div{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.item .actions{display:flex;gap:6px;flex:0 0 auto}
-.amt{flex:0 0 110px;text-align:right;font-family:var(--mono);font-weight:600;white-space:nowrap}
-.catrow{padding:7px 0;border-bottom:1px solid var(--line)}
-.catrow:last-child{border-bottom:0}
-.chip{display:inline-flex;align-items:center;gap:6px;border:1px solid var(--line);border-radius:3px;padding:3px 4px 3px 8px;font-size:12px}
-.chip button{padding:0 6px;background:transparent;color:var(--muted);border:0;font-size:14px;line-height:1}
-.notice{border:1px solid var(--accent);border-radius:3px;padding:10px 12px;margin:0 0 12px;font-size:12px}
-.notice p{margin:0 0 8px}
-.hidden{display:none!important}
-#status{position:fixed;left:50%;bottom:16px;transform:translateX(-50%);z-index:20;max-width:calc(100% - 32px);font-size:12px;background:var(--panel);border:1px solid var(--line);border-radius:4px;padding:8px 12px;box-shadow:0 4px 16px rgba(0,0,0,.25);cursor:pointer}
-#status:empty{display:none}
-.tabs{display:flex;gap:4px;position:sticky;top:0;z-index:10;background:var(--bg);border-bottom:1px solid var(--line)}
-.tab{flex:1 1 0;display:inline-flex;align-items:center;justify-content:center;gap:6px;background:transparent;color:var(--muted);border:0;border-bottom:2px solid transparent;border-radius:0;padding:11px 6px;font-size:11px;letter-spacing:.1em;text-transform:uppercase}
-.tab:hover{color:var(--text)}
-.tab[aria-current="page"]{color:var(--text);border-bottom-color:var(--accent)}
-.badge{font-family:var(--mono);font-size:10px;letter-spacing:0;line-height:1;padding:2px 6px;border-radius:8px;background:var(--line);color:var(--text)}
-.badge:empty:not(.dot){display:none}
-.badge.dot{width:7px;height:7px;padding:0;background:var(--danger)}
-@media(min-width:800px){.grid.two>.span2{grid-row:span 2}}
-/* Bangla: no letter case, and wide tracking breaks up conjuncts; small sizes are hard to read */
-:root[lang="bn"] h1,:root[lang="bn"] h2,:root[lang="bn"] .tab,:root[lang="bn"] button{text-transform:none;letter-spacing:0}
-:root[lang="bn"] h2{font-size:13px}
-:root[lang="bn"] .tab{font-size:12px}
-@media(max-width:599px){
-  main{padding-bottom:calc(76px + env(safe-area-inset-bottom))}
-  .tabs{position:fixed;left:0;right:0;top:auto;bottom:0;gap:0;background:var(--panel);border-bottom:0;border-top:1px solid var(--line);padding:0 env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left)}
-  .tab{flex-direction:column;justify-content:flex-start;gap:4px;padding:10px 2px 12px;border-bottom:0;border-top:2px solid transparent}
-  .tab[aria-current="page"]{border-top-color:var(--accent)}
-  #status{bottom:calc(72px + env(safe-area-inset-bottom))}
-  #who{max-width:45vw}
-  .stats{grid-template-columns:1fr 1fr}
-  .stats .stat:last-child{grid-column:1/-1}
-  .stat .v{font-size:clamp(16px,5vw,20px)}
-  .entry{flex-wrap:wrap;row-gap:6px}
-  .entry .info{flex:1 1 0}
-  .entry .amt{flex:0 0 auto}
-  .entry .actions{flex:1 0 100%;justify-content:flex-end}
-  .catline{flex-wrap:wrap;row-gap:2px}
-  .catline .spent{order:3;flex:1 0 100%}
-}
-/* Touch devices: 16px fields stop iOS zooming on focus; larger tap targets */
-@media(pointer:coarse){
-  input,select{font-size:16px}
-  button.small{min-height:40px;padding:6px 12px;font-size:12px}
-  .chip button{min-width:36px;min-height:36px}
-  .item .actions{gap:8px}
-}
-</style>
+<title>Expense Ledger</title>
+<meta name="theme-color" content="#0E1116">
+<meta name="description" content="Track spending, income and budgets month by month.">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" href="icon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="apple-touch-icon.png">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<!-- Set the theme before first paint so there is no light/dark flash -->
+<script>
+try {
+  var th = localStorage.getItem("theme");
+  if (th !== "light" && th !== "dark") th = matchMedia("(prefers-color-scheme: light)").matches ? "light" : "dark";
+  document.documentElement.dataset.theme = th;
+} catch (e) {}
+</script>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Noto+Sans+Bengali:wght@400;500;600;700&display=swap">
+<link rel="stylesheet" href="styles.css">
 </head>
-<body>
-<header>
-  <h1 data-i18n="appTitle">Expense Ledger</h1>
-  <div class="row" style="flex:0 0 auto;gap:12px">
-    <span class="muted" id="who"></span>
-    <button class="ghost small" id="langBtn" type="button" lang="bn">বাংলা</button>
-    <button class="ghost small" id="themeBtn" type="button">Light</button>
-  </div>
-</header>
+<body data-auth="loading" data-tab="expenses">
+<div class="shell">
 
-<main>
-  <section id="setup" class="panel hidden">
-    <h2>Setup needed</h2>
-    <p class="muted">Paste your Firebase web config into the <code>firebaseConfig</code> object in this file, then reload.</p>
-  </section>
-
-  <section id="loginCard" class="panel">
-    <h2 data-i18n="signInTitle">Sign in</h2>
-    <p class="muted" style="margin:0 0 12px" data-i18n="signInHint">Your data syncs to your Google account.</p>
-    <div id="inAppNotice" class="notice hidden">
-      <p data-i18n="inAppMsg">Google sign-in doesn't work inside this app's built-in browser. Open this page in Chrome or Safari.</p>
-      <div class="row"><button type="button" class="ghost" id="copyLinkBtn" data-i18n="copyLink">Copy link</button><button type="button" class="ghost hidden" id="openChromeBtn" data-i18n="openChrome">Open in Chrome</button></div>
+  <header class="topbar">
+    <div class="top-left">
+      <div class="brand">
+        <span class="logo" aria-hidden="true"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 3h12v18l-3-2-3 2-3-2-3 2z"/><path d="M9 8h6"/><path d="M9 12h6"/></svg></span>
+        <span class="brand-name" data-i18n="appTitle">Expense Ledger</span>
+      </div>
+      <h1 class="page-title when-in" id="pageTitle">Expenses</h1>
+      <div class="month-switch when-in">
+        <button type="button" class="icon-btn" id="prevMonth" data-i18n-aria="prevMonth" aria-label="Previous month"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M15 6l-6 6 6 6"/></svg></button>
+        <button type="button" class="month-btn" id="monthBtn"><span id="monthLabel"></span></button>
+        <input type="month" id="month" class="visually-hidden" tabindex="-1" aria-hidden="true">
+        <button type="button" class="icon-btn" id="nextMonth" data-i18n-aria="nextMonth" aria-label="Next month"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 6l6 6-6 6"/></svg></button>
+      </div>
     </div>
-    <button id="signInBtn" data-i18n="signInBtn">Sign in with Google</button>
-  </section>
+    <div class="top-right">
+      <label class="search when-in">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="M20 20l-4-4"/></svg>
+        <span class="visually-hidden" data-i18n="searchLabel">Search entries</span>
+        <input type="search" id="search" autocomplete="off" placeholder="Search notes, categories" data-i18n-ph="searchPh">
+        <kbd aria-hidden="true">/</kbd>
+      </label>
+      <button type="button" class="btn primary add-btn when-in" id="addBtn">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 5v14"/><path d="M5 12h14"/></svg>
+        <span id="addBtnLabel">Add expense</span>
+        <kbd aria-hidden="true">N</kbd>
+      </button>
+      <button type="button" class="account-btn top" id="accountBtn" aria-haspopup="menu" data-i18n-aria="accountMenu" aria-label="Account, theme and language">
+        <span class="avatar"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="8" r="4"/><path d="M4 21c0-4 4-6 8-6s8 2 8 6"/></svg></span>
+      </button>
+    </div>
+  </header>
 
-  <div id="appCards" class="hidden grid">
-    <section class="panel">
-      <div class="row" style="justify-content:space-between">
-        <input type="month" id="month" class="mono" style="max-width:180px">
-        <button class="ghost small" id="signOutBtn" data-i18n="signOut">Sign out</button>
-      </div>
-      <p class="muted" id="monthLabel" style="margin:14px 0 0"></p>
-      <div class="stats" style="margin-top:8px">
-        <div class="stat"><div class="muted" data-i18n="statIncome">Income</div><div class="v num" id="incomeTotal">৳0</div></div>
-        <div class="stat"><div class="muted" data-i18n="statSpent">Spent</div><div class="v num" id="total">৳0</div></div>
-        <div class="stat"><div class="muted" data-i18n="statBalance">Balance</div><div class="v num" id="balance">৳0</div></div>
-        <div class="stat"><div class="muted" data-i18n="statPlanned">Planned</div><div class="v num" id="planned">৳0</div></div>
-        <div class="stat"><div class="muted" data-i18n="statLeft">Estimated left</div><div class="v num" id="afterPlanned">৳0</div></div>
-      </div>
-      <p class="muted" style="margin:10px 0 0" data-i18n="statHint">Estimated left = balance minus everything you've planned this month.</p>
+  <nav class="nav when-in" id="nav" aria-label="Sections" data-i18n-aria="navLabel">
+    <div class="brand">
+      <span class="logo" aria-hidden="true"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 3h12v18l-3-2-3 2-3-2-3 2z"/><path d="M9 8h6"/><path d="M9 12h6"/></svg></span>
+      <span class="brand-name" data-i18n="appTitle">Expense Ledger</span>
+    </div>
+    <div class="nav-items">
+      <a class="nav-item" href="#/expenses" data-tab="expenses">
+        <span class="nav-icon"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 3h12v18l-3-2-3 2-3-2-3 2z"/><path d="M9 8h6"/><path d="M9 12h6"/></svg></span>
+        <span class="nav-label" data-i18n="tabExpenses">Expenses</span><span class="count" id="badge-expenses"></span>
+      </a>
+      <a class="nav-item" href="#/income" data-tab="income">
+        <span class="nav-icon"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3v12"/><path d="M7 10l5 5 5-5"/><path d="M4 17v3h16v-3"/></svg></span>
+        <span class="nav-label" data-i18n="tabIncome">Income</span><span class="count" id="badge-income"></span>
+      </a>
+      <button type="button" class="fab" id="fab" data-i18n-aria="addEntry" aria-label="Add entry">
+        <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 5v14"/><path d="M5 12h14"/></svg>
+      </button>
+      <a class="nav-item" href="#/planned" data-tab="planned">
+        <span class="nav-icon"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="5" width="18" height="16" rx="2"/><path d="M3 10h18"/><path d="M8 3v4"/><path d="M16 3v4"/></svg></span>
+        <span class="nav-label" data-i18n="tabPlanned">Planned</span><span class="count" id="badge-planned"></span>
+      </a>
+      <a class="nav-item" href="#/budgets" data-tab="budgets" id="navBudgets">
+        <span class="nav-icon"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3a9 9 0 1 0 9 9h-9z"/><path d="M15 2.5A9 9 0 0 1 21.5 9H15z"/></svg><span class="alert" id="badge-budgets"></span></span>
+        <span class="nav-label" data-i18n="tabBudgets">Budgets</span>
+      </a>
+    </div>
+    <button type="button" class="account-btn side" id="accountBtnSide" aria-haspopup="menu">
+      <span class="avatar"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="8" r="4"/><path d="M4 21c0-4 4-6 8-6s8 2 8 6"/></svg></span>
+      <span class="account-text">
+        <span class="account-name" data-i18n="account">Account</span>
+        <span class="account-sub"><span class="sync-dot" aria-hidden="true"></span><span data-i18n="synced">Synced with Google</span></span>
+      </span>
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M8 9l4-4 4 4"/><path d="M8 15l4 4 4-4"/></svg>
+    </button>
+  </nav>
+
+  <main id="main">
+    <div class="loading when-loading" role="status"><span class="spinner" aria-hidden="true"></span><span data-i18n="loading">Loading…</span></div>
+
+    <section class="card centered-card when-setup">
+      <h2>Setup needed</h2>
+      <p class="muted">Paste your Firebase web config into the <code>firebaseConfig</code> object in app.js, then reload.</p>
     </section>
 
-    <nav class="tabs" aria-label="Sections" data-i18n-aria="navLabel">
-      <button type="button" class="tab" data-tab="expenses"><span data-i18n="tabExpenses">Expenses</span><span class="badge" id="badge-expenses"></span></button>
-      <button type="button" class="tab" data-tab="income"><span data-i18n="tabIncome">Income</span><span class="badge" id="badge-income"></span></button>
-      <button type="button" class="tab" data-tab="planned"><span data-i18n="tabPlanned">Planned</span><span class="badge" id="badge-planned"></span></button>
-      <button type="button" class="tab" data-tab="budgets"><span data-i18n="tabBudgets">Budgets</span><span class="badge" id="badge-budgets" title="A category is over budget" data-i18n-title="overBudgetTitle"></span></button>
-    </nav>
-
-    <div class="tab-panel grid two" data-panel="expenses">
-      <section class="panel">
-        <h2 data-i18n="addExpense">Add expense</h2>
-        <form id="addForm" class="grid" style="gap:8px">
-          <input type="text" inputmode="decimal" autocomplete="off" id="amount" class="mono" placeholder="Amount (৳)" data-i18n-ph="phAmount" required>
-          <select id="category"></select>
-          <input type="date" id="date" required>
-          <input type="text" id="note" placeholder="Note (optional)" data-i18n-ph="phNote">
-          <button type="submit" data-i18n="addExpense">Add expense</button>
-        </form>
-      </section>
-      <section class="panel span2">
-        <h2 data-i18n="expensesThisMonth">Expenses this month</h2>
-        <div id="list"></div>
-      </section>
-      <section class="panel">
-        <h2 data-i18n="recurringExpenses">Recurring expenses</h2>
-        <div id="recurring"></div>
-        <form id="recForm" class="grid" style="gap:8px;margin-top:12px">
-          <input type="text" inputmode="decimal" autocomplete="off" id="rAmount" class="mono" placeholder="Amount (৳)" data-i18n-ph="phAmount" required>
-          <select id="rCategory"></select>
-          <input type="text" inputmode="numeric" autocomplete="off" id="rDay" class="mono" placeholder="Day of month" data-i18n-ph="phDay" value="1" required>
-          <input type="text" id="rNote" placeholder="Name, e.g. House rent" data-i18n-ph="phRecName">
-          <div class="row"><button type="submit" data-i18n="add">Add</button><button class="ghost" type="button" id="applyRec" data-i18n="applyMonth">Apply to this month</button></div>
-        </form>
-      </section>
-    </div>
-
-    <div class="tab-panel grid two hidden" data-panel="income">
-      <section class="panel">
-        <h2 data-i18n="addIncome">Add income</h2>
-        <form id="incForm" class="grid" style="gap:8px">
-          <input type="text" inputmode="decimal" autocomplete="off" id="iAmount" class="mono" placeholder="Amount (৳)" data-i18n-ph="phAmount" required>
-          <input type="date" id="iDate" required>
-          <input type="text" id="iNote" placeholder="Source, e.g. Freelance" data-i18n-ph="phSource">
-          <button type="submit" data-i18n="addIncome">Add income</button>
-        </form>
-      </section>
-      <section class="panel span2">
-        <h2 data-i18n="incomeThisMonth">Income this month</h2>
-        <div id="incomeList"></div>
-      </section>
-      <section class="panel">
-        <h2 data-i18n="recurringIncome">Recurring income</h2>
-        <div id="recurringIncome"></div>
-        <form id="recIncForm" class="grid" style="gap:8px;margin-top:12px">
-          <input type="text" inputmode="decimal" autocomplete="off" id="riAmount" class="mono" placeholder="Amount (৳)" data-i18n-ph="phAmount" required>
-          <input type="text" inputmode="numeric" autocomplete="off" id="riDay" class="mono" placeholder="Day of month" data-i18n-ph="phDay" value="1" required>
-          <input type="text" id="riNote" placeholder="Name, e.g. Monthly salary" data-i18n-ph="phRecIncName">
-          <div class="row"><button type="submit" data-i18n="add">Add</button><button class="ghost" type="button" id="applyRecIncome" data-i18n="applyMonth">Apply to this month</button></div>
-        </form>
-      </section>
-    </div>
-
-    <div class="tab-panel grid hidden" data-panel="planned">
-      <section class="panel">
-        <h2 data-i18n="plannedTitle">Planned spending</h2>
-        <p class="muted" style="margin:0 0 6px" data-i18n="plannedHint">Costs you intend to make this month. "Mark spent" turns one into a real expense.</p>
-        <div id="plannedList"></div>
-        <form id="planForm" class="grid" style="gap:8px;margin-top:12px">
-          <input type="text" inputmode="decimal" autocomplete="off" id="pAmount" class="mono" placeholder="Amount (৳)" data-i18n-ph="phAmount" required>
-          <select id="pCategory"></select>
-          <input type="date" id="pDate" required>
-          <input type="text" id="pNote" placeholder="What, e.g. Eid shopping" data-i18n-ph="phWhat">
-          <button type="submit" data-i18n="addPlanned">Add planned</button>
-        </form>
-      </section>
-    </div>
-
-    <div class="tab-panel grid hidden" data-panel="budgets">
-      <section class="panel">
-        <h2 data-i18n="catsTitle">Categories &amp; budgets</h2>
-        <div class="row" style="margin-bottom:10px">
-          <input type="text" id="newCat" placeholder="New category name" data-i18n-ph="phNewCat" maxlength="30">
-          <button class="ghost" type="button" id="addCatBtn" data-i18n="addCat">Add category</button>
+    <section class="card centered-card signin when-out" aria-labelledby="signInTitle">
+      <span class="logo big" aria-hidden="true"><svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 3h12v18l-3-2-3 2-3-2-3 2z"/><path d="M9 8h6"/><path d="M9 12h6"/></svg></span>
+      <h1 id="signInTitle" data-i18n="appTitle">Expense Ledger</h1>
+      <p class="muted" data-i18n="signInHint">Track spending, income and budgets month by month. Your data syncs to your Google account.</p>
+      <div id="inAppNotice" class="notice" hidden>
+        <p data-i18n="inAppMsg">Google sign-in doesn't work inside this app's built-in browser. Open this page in Chrome or Safari.</p>
+        <div class="btn-row">
+          <button type="button" class="btn secondary" id="copyLinkBtn" data-i18n="copyLink">Copy link</button>
+          <button type="button" class="btn secondary" id="openChromeBtn" data-i18n="openChrome" hidden>Open in Chrome</button>
         </div>
-        <div id="catChips" class="row" style="margin-bottom:12px"></div>
-        <p class="muted" style="margin:0 0 6px" data-i18n="budgetHint">Leave a budget empty for no limit. Bars turn red when you go over.</p>
-        <div id="cats"></div>
-        <div class="row" style="margin-top:12px"><button id="saveBudgets" data-i18n="saveBudgets">Save budgets</button></div>
+      </div>
+      <button type="button" class="btn primary block" id="signInBtn" data-i18n="signInBtn">Sign in with Google</button>
+    </section>
+
+    <div class="app when-in" id="appCards">
+      <section class="summary" aria-label="Month summary" data-i18n-aria="summaryLabel">
+        <div class="hero">
+          <div class="label" id="leftLabel">Left to spend</div>
+          <div class="hero-value num" id="leftValue">৳0</div>
+          <div class="hero-sub" id="leftSub"></div>
+          <div class="stack" id="stackBar" role="img"><span class="seg spent" id="stackSpent"></span><span class="seg planned" id="stackPlanned"></span></div>
+        </div>
+        <div class="kpis">
+          <div class="kpi">
+            <div class="label" data-i18n="statIncome">Income</div>
+            <div class="kpi-value num" id="incomeTotal">৳0</div>
+            <div class="kpi-sub" id="incomeSub"></div>
+          </div>
+          <div class="kpi">
+            <div class="label"><span class="key spent" aria-hidden="true"></span><span data-i18n="statSpent">Spent</span></div>
+            <div class="kpi-value num" id="total">৳0</div>
+            <div class="kpi-sub" id="spentSub"></div>
+          </div>
+          <div class="kpi">
+            <div class="label"><span class="key planned" aria-hidden="true"></span><span data-i18n="statPlanned">Planned</span></div>
+            <div class="kpi-value num" id="planned">৳0</div>
+            <div class="kpi-sub" id="plannedSub"></div>
+          </div>
+        </div>
       </section>
+
+      <!-- Expenses -->
+      <div class="tab-panel cols" data-panel="expenses">
+        <div class="col-main">
+          <section class="card chart-card" aria-labelledby="chartTitle">
+            <div class="card-head">
+              <h2 id="chartTitle" data-i18n="chartTitle">Spending this month</h2>
+              <div class="legend">
+                <span><span class="legend-line" aria-hidden="true"></span><span data-i18n="chartSpent">Spent so far</span></span>
+                <span id="chartPaceLegend"><span class="legend-dash" aria-hidden="true"></span><span id="chartPaceText"></span></span>
+              </div>
+            </div>
+            <div id="chart"></div>
+          </section>
+          <div class="rec-banner card" id="recBannerExp" hidden></div>
+          <section class="card list-card" aria-labelledby="expTitle">
+            <div class="card-head">
+              <h2 id="expTitle" data-i18n="tabExpenses">Expenses</h2>
+              <span class="muted" id="expCount"></span>
+            </div>
+            <div class="chips" id="catFilter" role="group" data-i18n-aria="filterLabel" aria-label="Filter by category" hidden></div>
+            <div id="list" class="grouped"></div>
+          </section>
+          <section class="card list-card" aria-labelledby="recTitle">
+            <div class="card-head"><h2 id="recTitle" data-i18n="recurringExpenses">Recurring expenses</h2></div>
+            <div id="recurring" class="flat"></div>
+            <p class="hint" data-i18n="recHintExp">Turn on “Repeat every month” when adding an expense to make it recurring.</p>
+          </section>
+        </div>
+        <aside class="col-side">
+          <section class="card side-card" id="whereCard" aria-labelledby="whereTitle">
+            <h2 id="whereTitle" data-i18n="whereTitle">Where it went</h2>
+            <div id="where"></div>
+          </section>
+          <section class="card side-card" id="watchCard" aria-labelledby="watchTitle" hidden>
+            <div class="card-head"><h2 id="watchTitle" data-i18n="watchTitle">Budget watch</h2><a href="#/budgets" class="text-link" data-i18n="allBudgets">All budgets</a></div>
+            <div id="watch"></div>
+          </section>
+          <section class="card side-card" id="plannedPreviewCard" aria-labelledby="ppTitle" hidden>
+            <div class="card-head"><h2 id="ppTitle" data-i18n="tabPlanned">Planned</h2><a href="#/planned" class="text-link" data-i18n="viewAll">View all</a></div>
+            <div id="plannedPreview"></div>
+          </section>
+        </aside>
+      </div>
+
+      <!-- Income -->
+      <div class="tab-panel cols single" data-panel="income" hidden>
+        <div class="col-main">
+          <div class="rec-banner card" id="recBannerInc" hidden></div>
+          <section class="card list-card" aria-labelledby="incTitle">
+            <div class="card-head">
+              <h2 id="incTitle" data-i18n="tabIncome">Income</h2>
+              <span class="muted" id="incCount"></span>
+            </div>
+            <div id="incomeList" class="grouped"></div>
+          </section>
+          <section class="card list-card" aria-labelledby="recIncTitle">
+            <div class="card-head"><h2 id="recIncTitle" data-i18n="recurringIncome">Recurring income</h2></div>
+            <div id="recurringIncome" class="flat"></div>
+            <p class="hint" data-i18n="recHintInc">Turn on “Repeat every month” when adding income to make it recurring.</p>
+          </section>
+        </div>
+      </div>
+
+      <!-- Planned -->
+      <div class="tab-panel cols single" data-panel="planned" hidden>
+        <div class="col-main">
+          <section class="card list-card" aria-labelledby="planTitle">
+            <div class="card-head">
+              <h2 id="planTitle" data-i18n="plannedTitle">Planned spending</h2>
+              <span class="muted" id="planCount"></span>
+            </div>
+            <p class="hint top" data-i18n="plannedHint">Costs you intend to make this month. “Mark spent” turns one into a real expense.</p>
+            <div id="plannedList" class="grouped"></div>
+          </section>
+        </div>
+      </div>
+
+      <!-- Budgets -->
+      <div class="tab-panel cols single" data-panel="budgets" hidden>
+        <div class="col-main">
+          <div class="section-head">
+            <h2 class="section-title" data-i18n="tabBudgets">Budgets</h2>
+            <button type="button" class="text-btn" id="editBudgets">Edit</button>
+          </div>
+          <section class="card budget-summary" id="budgetSummary"></section>
+          <section class="card budget-list" id="budgetList"></section>
+        </div>
+      </div>
     </div>
+  </main>
+</div>
+
+<dialog id="entryDialog" class="sheet" aria-labelledby="entryTitle">
+  <form id="entryForm" novalidate>
+    <div class="grabber" aria-hidden="true"></div>
+    <div class="sheet-head">
+      <button type="button" class="text-btn muted-btn" id="entryCancel" data-i18n="cancel">Cancel</button>
+      <h2 id="entryTitle" data-i18n="newEntry">New entry</h2>
+      <span></span>
+    </div>
+    <div class="segmented" role="radiogroup" aria-label="Entry type" data-i18n-aria="entryType">
+      <label><input type="radio" name="kind" value="expense" checked><span data-i18n="kindExpense">Expense</span></label>
+      <label><input type="radio" name="kind" value="income"><span data-i18n="kindIncome">Income</span></label>
+      <label><input type="radio" name="kind" value="planned"><span data-i18n="kindPlanned">Planned</span></label>
+    </div>
+    <div class="amount-field">
+      <label for="eAmount" data-i18n="amount">Amount</label>
+      <div class="amount-input"><span aria-hidden="true">৳</span><input id="eAmount" class="num" inputmode="decimal" autocomplete="off" placeholder="0" required></div>
+    </div>
+    <fieldset class="cat-field" id="eCatField">
+      <legend data-i18n="category">Category</legend>
+      <div class="cat-grid" id="eCatGrid"></div>
+    </fieldset>
+    <div class="field-group">
+      <label class="field-row"><span data-i18n="date">Date</span><input type="date" id="eDate" required></label>
+      <label class="field-row"><span data-i18n="note">Note</span><input type="text" id="eNote" maxlength="80" autocomplete="off"></label>
+      <label class="field-row" id="eRepeatRow"><span data-i18n="repeatMonthly">Repeat every month</span><input type="checkbox" role="switch" id="eRepeat" class="switch"></label>
+    </div>
+    <button type="submit" class="btn primary block big" id="entrySubmit">Add expense</button>
+  </form>
+</dialog>
+
+<dialog id="confirmDialog" class="confirm" aria-describedby="confirmMsg">
+  <p id="confirmMsg"></p>
+  <div class="btn-row end">
+    <button type="button" class="btn secondary" id="confirmNo" data-i18n="cancel">Cancel</button>
+    <button type="button" class="btn danger" id="confirmYes">Delete</button>
   </div>
+</dialog>
 
-  <p id="status" class="muted" role="status" aria-live="polite" title="Click to dismiss" data-i18n-title="dismiss"></p>
-</main>
+<div id="menu" class="menu" role="menu" hidden></div>
 
-<script type="module">
-import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
-import { getAuth, GoogleAuthProvider, signInWithPopup, signOut, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js";
-import { getFirestore, collection, doc, addDoc, deleteDoc, setDoc, onSnapshot, query, where, orderBy } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
+<div id="toast" class="toast" role="status" aria-live="polite" hidden>
+  <span id="toastMsg"></span>
+  <button type="button" class="toast-action" id="toastAction" hidden></button>
+</div>
 
-// ===== FIREBASE WEB CONFIG =====
-const firebaseConfig = {
-  apiKey: "AIzaSyCxGxl9MB56Hukv5qij_t-jbtdrdVoNacs",
-  authDomain: "personal-expense-tracker-d2914.firebaseapp.com",
-  projectId: "personal-expense-tracker-d2914",
-  appId: "1:642059260081:web:0e3f0055881797852ad290"
-};
-// ===============================
-
-const DEFAULT_CATEGORIES = ["Food","Transport","Bills","Rent","Shopping","Health","Entertainment","Other"];
-const $ = id => document.getElementById(id);
-const pad = n => String(n).padStart(2, "0");
-const todayISO = () => { const d = new Date(); return `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}`; };
-// ----- Language -----
-const STRINGS = {
-  en: {
-    docTitle: "Expense Tracker", appTitle: "Expense Ledger", themeLight: "Light", themeDark: "Dark", switchLang: "Switch to Bangla",
-    signInTitle: "Sign in", signInHint: "Your data syncs to your Google account.", signInBtn: "Sign in with Google", signOut: "Sign out",
-    inAppMsg: "Google sign-in doesn't work inside this app's built-in browser. Open this page in Chrome or Safari.",
-    copyLink: "Copy link", openChrome: "Open in Chrome", linkCopied: "Link copied. Paste it into Chrome or Safari.",
-    copyFailed: "Couldn't copy. Copy the address from the menu instead.",
-    statIncome: "Income", statSpent: "Spent", statBalance: "Balance", statPlanned: "Planned", statLeft: "Estimated left",
-    statHint: "Estimated left = balance minus everything you've planned this month.",
-    navLabel: "Sections", tabExpenses: "Expenses", tabIncome: "Income", tabPlanned: "Planned", tabBudgets: "Budgets",
-    overBudgetTitle: "A category is over budget", budgetsOverAria: "Budgets, over budget", dismiss: "Click to dismiss",
-    addExpense: "Add expense", expensesThisMonth: "Expenses this month", recurringExpenses: "Recurring expenses",
-    addIncome: "Add income", incomeThisMonth: "Income this month", recurringIncome: "Recurring income",
-    plannedTitle: "Planned spending", plannedHint: 'Costs you intend to make this month. "Mark spent" turns one into a real expense.',
-    addPlanned: "Add planned", catsTitle: "Categories & budgets", addCat: "Add category",
-    budgetHint: "Leave a budget empty for no limit. Bars turn red when you go over.", saveBudgets: "Save budgets",
-    add: "Add", applyMonth: "Apply to this month",
-    phAmount: "Amount (৳)", phNote: "Note (optional)", phDay: "Day of month", phRecName: "Name, e.g. House rent",
-    phSource: "Source, e.g. Freelance", phRecIncName: "Name, e.g. Monthly salary", phWhat: "What, e.g. Eid shopping",
-    phNewCat: "New category name", phBudget: "Budget", removeCat: "Remove category",
-    markSpent: "Mark spent", delete: "Delete", income: "Income", dayOfMonth: "day {day} of each month",
-    budgetOver: "{spent} / {budget} · over {diff}", budgetLeft: "{spent} / {budget} · left {diff}",
-    noExpenses: "No expenses this month.", noIncome: "No income this month.", noPlanned: "Nothing planned this month.",
-    noRecurring: "No recurring expenses yet.", noRecurringIncome: "No recurring income yet.",
-    confirmDelExpense: "Delete this expense?", confirmDelIncome: "Delete this income entry?", confirmDelPlanned: "Delete this planned item?",
-    confirmDelRec: "Delete this recurring expense? Existing entries stay.", confirmDelRecInc: "Delete this recurring income? Existing entries stay.",
-    confirmRemoveCat: 'Remove "{name}"? Existing expenses keep this name, but it won\'t be offered in forms.',
-    catExists: '"{name}" already exists.', catAdded: 'Added category "{name}".', catRemoved: 'Removed category "{name}".',
-    keepOneCat: "Keep at least one category.", invalidAmount: "Enter a valid amount greater than 0.", invalidDay: "Enter a day between 1 and 31.",
-    expenseAdded: "Expense added.", incomeAdded: "Income added.", plannedAdded: "Planned item added.", movedToExpenses: "Moved to expenses.",
-    budgetsSaved: "Budgets saved.", recSaved: "Recurring expense saved.", recIncSaved: "Recurring income saved.",
-    appliedExp: "Added {n} recurring expense(s) to {month}.", appliedInc: "Added {n} recurring income entr(ies) to {month}.",
-    nothingExp: "Nothing to add: recurring expenses already applied, or none set up.",
-    nothingInc: "Nothing to add: recurring income already applied, or none set up."
-  },
-  bn: {
-    docTitle: "খরচের হিসাব", appTitle: "খরচের খাতা", themeLight: "লাইট", themeDark: "ডার্ক", switchLang: "ইংরেজিতে দেখুন",
-    signInTitle: "সাইন ইন", signInHint: "আপনার তথ্য আপনার Google অ্যাকাউন্টে সিঙ্ক হয়।", signInBtn: "Google দিয়ে সাইন ইন", signOut: "সাইন আউট",
-    inAppMsg: "এই অ্যাপের ভেতরের ব্রাউজারে Google সাইন-ইন কাজ করে না। পেজটি Chrome বা Safari-তে খুলুন।",
-    copyLink: "লিংক কপি করুন", openChrome: "Chrome-এ খুলুন", linkCopied: "লিংক কপি হয়েছে। Chrome বা Safari-তে পেস্ট করুন।",
-    copyFailed: "কপি করা যায়নি। মেনু থেকে ঠিকানাটি কপি করুন।",
-    statIncome: "আয়", statSpent: "খরচ", statBalance: "ব্যালেন্স", statPlanned: "পরিকল্পিত", statLeft: "আনুমানিক বাকি",
-    statHint: "আনুমানিক বাকি = ব্যালেন্স থেকে এ মাসের সব পরিকল্পিত খরচ বাদ দিয়ে।",
-    navLabel: "বিভাগ", tabExpenses: "খরচ", tabIncome: "আয়", tabPlanned: "পরিকল্পনা", tabBudgets: "বাজেট",
-    overBudgetTitle: "কোনো ক্যাটাগরি বাজেট ছাড়িয়েছে", budgetsOverAria: "বাজেট, বাজেট ছাড়িয়েছে", dismiss: "বন্ধ করতে চাপুন",
-    addExpense: "খরচ যোগ করুন", expensesThisMonth: "এ মাসের খরচ", recurringExpenses: "নিয়মিত খরচ",
-    addIncome: "আয় যোগ করুন", incomeThisMonth: "এ মাসের আয়", recurringIncome: "নিয়মিত আয়",
-    plannedTitle: "পরিকল্পিত খরচ", plannedHint: 'এ মাসে যেসব খরচ করবেন বলে ঠিক করেছেন। "খরচ হয়েছে" চাপলে সেটি আসল খরচে চলে যায়।',
-    addPlanned: "পরিকল্পনা যোগ করুন", catsTitle: "ক্যাটাগরি ও বাজেট", addCat: "ক্যাটাগরি যোগ করুন",
-    budgetHint: "সীমা না চাইলে বাজেট খালি রাখুন। বাজেট ছাড়ালে বার লাল হয়ে যায়।", saveBudgets: "বাজেট সংরক্ষণ করুন",
-    add: "যোগ করুন", applyMonth: "এ মাসে যোগ করুন",
-    phAmount: "পরিমাণ (৳)", phNote: "নোট (ঐচ্ছিক)", phDay: "মাসের তারিখ", phRecName: "নাম, যেমন বাসা ভাড়া",
-    phSource: "উৎস, যেমন ফ্রিল্যান্স", phRecIncName: "নাম, যেমন মাসিক বেতন", phWhat: "কী, যেমন ঈদের কেনাকাটা",
-    phNewCat: "নতুন ক্যাটাগরির নাম", phBudget: "বাজেট", removeCat: "ক্যাটাগরি মুছুন",
-    markSpent: "খরচ হয়েছে", delete: "মুছুন", income: "আয়", dayOfMonth: "প্রতি মাসের {day} তারিখ",
-    budgetOver: "{spent} / {budget} · {diff} বেশি", budgetLeft: "{spent} / {budget} · {diff} বাকি",
-    noExpenses: "এ মাসে কোনো খরচ নেই।", noIncome: "এ মাসে কোনো আয় নেই।", noPlanned: "এ মাসে কোনো পরিকল্পনা নেই।",
-    noRecurring: "এখনও কোনো নিয়মিত খরচ নেই।", noRecurringIncome: "এখনও কোনো নিয়মিত আয় নেই।",
-    confirmDelExpense: "এই খরচটি মুছবেন?", confirmDelIncome: "এই আয়টি মুছবেন?", confirmDelPlanned: "এই পরিকল্পনাটি মুছবেন?",
-    confirmDelRec: "এই নিয়মিত খরচটি মুছবেন? আগের এন্ট্রিগুলো থেকে যাবে।", confirmDelRecInc: "এই নিয়মিত আয়টি মুছবেন? আগের এন্ট্রিগুলো থেকে যাবে।",
-    confirmRemoveCat: '"{name}" মুছবেন? আগের খরচে নামটি থেকে যাবে, তবে ফর্মে আর দেখাবে না।',
-    catExists: '"{name}" আগে থেকেই আছে।', catAdded: '"{name}" ক্যাটাগরি যোগ হয়েছে।', catRemoved: '"{name}" ক্যাটাগরি মুছে ফেলা হয়েছে।',
-    keepOneCat: "অন্তত একটি ক্যাটাগরি রাখতে হবে।", invalidAmount: "০-এর বেশি একটি সঠিক পরিমাণ লিখুন।", invalidDay: "১ থেকে ৩১-এর মধ্যে একটি তারিখ লিখুন।",
-    expenseAdded: "খরচ যোগ হয়েছে।", incomeAdded: "আয় যোগ হয়েছে।", plannedAdded: "পরিকল্পনা যোগ হয়েছে।", movedToExpenses: "খরচে সরানো হয়েছে।",
-    budgetsSaved: "বাজেট সংরক্ষণ হয়েছে।", recSaved: "নিয়মিত খরচ সংরক্ষণ হয়েছে।", recIncSaved: "নিয়মিত আয় সংরক্ষণ হয়েছে।",
-    appliedExp: "{month}-এ {n}টি নিয়মিত খরচ যোগ হয়েছে।", appliedInc: "{month}-এ {n}টি নিয়মিত আয় যোগ হয়েছে।",
-    nothingExp: "যোগ করার কিছু নেই: নিয়মিত খরচ আগেই যোগ হয়েছে, অথবা কোনোটি ঠিক করা নেই।",
-    nothingInc: "যোগ করার কিছু নেই: নিয়মিত আয় আগেই যোগ হয়েছে, অথবা কোনোটি ঠিক করা নেই।"
-  }
-};
-// Display names for the built-in categories. Stored names never change, so switching language can't split history.
-const CAT_BN = { Food: "খাবার", Transport: "যাতায়াত", Bills: "বিল", Rent: "ভাড়া", Shopping: "কেনাকাটা", Health: "স্বাস্থ্য", Entertainment: "বিনোদন", Other: "অন্যান্য" };
-const LOCALES = { en: "en-IN", bn: "bn-BD" };
-let lang = "en";
-let numFmt, intFmt, dateFmt;
-
-function t(key, vars) {
-  let s = STRINGS[lang]?.[key] ?? STRINGS.en[key] ?? key;
-  if (vars) s = s.replace(/\{(\w+)\}/g, (m, k) => (k in vars ? vars[k] : m));
-  return s;
-}
-function setFormatters() {
-  const loc = LOCALES[lang];
-  numFmt = new Intl.NumberFormat(loc, { maximumFractionDigits: 2 });
-  intFmt = new Intl.NumberFormat(loc, { useGrouping: false });
-  dateFmt = new Intl.DateTimeFormat(loc, { day: "numeric", month: "short" });
-}
-setFormatters();
-const catLabel = c => (lang === "bn" && CAT_BN[c]) || c;
-const fmtInt = n => intFmt.format(n);
-// "2026-11-27" -> "27 Nov" / "২৭ নভে"; parsed as a local date so it never shifts a day
-const fmtDate = iso => { const [y, m, d] = iso.split("-").map(Number); return dateFmt.format(new Date(y, m - 1, d)); };
-const monthName = ym => { const [y, m] = ym.split("-").map(Number); return new Date(y, m - 1, 1).toLocaleString(LOCALES[lang], { month: "long", year: "numeric" }); };
-// Accepts Latin or Bangla digits, commas and a leading ৳; returns NaN for anything else
-const parseNum = str => {
-  const s = String(str ?? "").trim().replace(/[০-৯]/g, d => "০১২৩৪৫৬৭৮৯".indexOf(d)).replace(/[,\s৳]/g, "");
-  return /^-?(\d+\.?\d*|\.\d+)$/.test(s) ? Number(s) : NaN;
-};
-
-const parseDay = str => { const n = parseNum(str); return Number.isInteger(n) && n >= 1 ? Math.min(31, n) : null; };
-
-const fmt = n => "৳" + numFmt.format(Number(n || 0));
-const signed = n => (n < 0 ? "-" : "") + fmt(Math.abs(n));
-const sum = arr => arr.reduce((s, x) => s + Number(x.amount), 0);
-// Status toast: confirmations clear after 4s, errors stay until clicked or replaced
-let statusTimer;
-const setStatus = (msg, isErr) => {
-  const s = $("status");
-  clearTimeout(statusTimer);
-  s.textContent = msg || "";
-  s.style.color = isErr ? "var(--danger)" : "";
-  if (msg && !isErr) statusTimer = setTimeout(() => { s.textContent = ""; }, 4000);
-};
-$("status").onclick = () => setStatus("");
-const onErr = e => setStatus(e.message, true);
-
-// ----- Theme (dark by default; choice is remembered on this device) -----
-function applyTheme(theme) {
-  document.documentElement.dataset.theme = theme;
-  $("themeBtn").textContent = theme === "dark" ? t("themeLight") : t("themeDark");
-}
-function initTheme() {
-  let saved = null;
-  try { saved = localStorage.getItem("theme"); } catch (e) {}
-  applyTheme(saved || "dark");
-}
-$("themeBtn").onclick = () => {
-  const next = document.documentElement.dataset.theme === "dark" ? "light" : "dark";
-  try { localStorage.setItem("theme", next); } catch (e) {}
-  applyTheme(next);
-};
-initTheme();
-
-// ----- Tabs (state lives in the URL hash as #/name so reload and back/forward work) -----
-const TABS = ["expenses", "income", "planned", "budgets"];
-const tabFromHash = () => location.hash.replace(/^#\/?/, "");
-function showTab(name) {
-  if (!TABS.includes(name)) name = TABS[0];
-  document.querySelectorAll(".tab-panel").forEach(p => p.classList.toggle("hidden", p.dataset.panel !== name));
-  document.querySelectorAll(".tab").forEach(b => {
-    if (b.dataset.tab === name) b.setAttribute("aria-current", "page");
-    else b.removeAttribute("aria-current");
-  });
-  return name;
-}
-// After switching, make sure the new panel's top isn't scrolled out of view
-function revealPanel(name) {
-  const nav = document.querySelector(".tabs");
-  const panel = document.querySelector(`.tab-panel[data-panel="${name}"]`);
-  const offset = getComputedStyle(nav).position === "sticky" ? nav.offsetHeight : 0;
-  const top = panel.getBoundingClientRect().top;
-  if (top < offset) window.scrollBy(0, top - offset - 12);
-}
-function initTabs() {
-  document.querySelectorAll(".tab").forEach(b => {
-    b.onclick = () => { location.hash = "/" + b.dataset.tab; };
-  });
-  window.addEventListener("hashchange", () => revealPanel(showTab(tabFromHash())));
-  showTab(tabFromHash());
-}
-initTabs();
-
-// ----- In-app browsers (Messenger, Facebook, Instagram, Android webviews): Google blocks OAuth there -----
-const isInAppBrowser = ua => /FBAN|FBAV|FB_IAB|Instagram|Messenger|Line\/|MicroMessenger|; wv\)/.test(ua);
-function initInAppNotice() {
-  const ua = navigator.userAgent;
-  if (!isInAppBrowser(ua)) return;
-  $("inAppNotice").classList.remove("hidden");
-  $("copyLinkBtn").onclick = async () => {
-    try { await navigator.clipboard.writeText(location.href); setStatus(t("linkCopied")); }
-    catch (e) { setStatus(t("copyFailed"), true); }
-  };
-  if (/Android/.test(ua)) {
-    const b = $("openChromeBtn");
-    b.classList.remove("hidden");
-    b.onclick = () => {
-      location.href = `intent://${location.host}${location.pathname}${location.search}#Intent;scheme=https;package=com.android.chrome;end`;
-    };
-  }
-}
-initInAppNotice();
-
-// ----- State -----
-let selectedMonth = todayISO().slice(0, 7);
-let user = null;
-let categories = [...DEFAULT_CATEGORIES];
-let expenses = [], income = [], planned = [], budgets = {}, recurring = [], recurringIncome = [];
-let unsubs = [], monthUnsubs = [];
-let auth, db;
-
-// Runs after state is declared because it re-renders. Choice is remembered on this device.
-function applyLang() {
-  document.documentElement.lang = lang;
-  document.title = t("docTitle");
-  setFormatters();
-  document.querySelectorAll("[data-i18n]").forEach(el => { el.textContent = t(el.dataset.i18n); });
-  document.querySelectorAll("[data-i18n-ph]").forEach(el => { el.placeholder = t(el.dataset.i18nPh); });
-  document.querySelectorAll("[data-i18n-title]").forEach(el => { el.title = t(el.dataset.i18nTitle); });
-  document.querySelectorAll("[data-i18n-aria]").forEach(el => { el.setAttribute("aria-label", t(el.dataset.i18nAria)); });
-  const lb = $("langBtn");
-  lb.textContent = lang === "en" ? "বাংলা" : "EN";
-  lb.lang = lang === "en" ? "bn" : "en";
-  lb.setAttribute("aria-label", t("switchLang"));
-  applyTheme(document.documentElement.dataset.theme);
-  renderSummary();
-  onCategoriesChanged();
-  renderLists();
-}
-function initLang() {
-  let saved = null;
-  try { saved = localStorage.getItem("lang"); } catch (e) {}
-  lang = saved === "bn" || saved === "en" ? saved : (/^bn\b/i.test(navigator.language || "") ? "bn" : "en");
-  $("langBtn").onclick = () => {
-    lang = lang === "en" ? "bn" : "en";
-    try { localStorage.setItem("lang", lang); } catch (e) {}
-    applyLang();
-  };
-  applyLang();
-}
-initLang();
-
-const configured = !firebaseConfig.apiKey.startsWith("YOUR_");
-if (!configured) {
-  $("setup").classList.remove("hidden");
-  $("loginCard").classList.add("hidden");
-} else {
-  const app = initializeApp(firebaseConfig);
-  auth = getAuth(app);
-  db = getFirestore(app);
-  init();
-}
-
-function init() {
-  buildCategoryRows();
-  fillCategorySelects();
-  $("month").value = selectedMonth;
-  $("date").value = todayISO();
-  $("iDate").value = todayISO();
-  $("pDate").value = todayISO();
-
-  $("month").onchange = e => { selectedMonth = e.target.value; if (user) subscribeMonth(); };
-  $("signInBtn").onclick = guard(() => signInWithPopup(auth, new GoogleAuthProvider()));
-  $("signOutBtn").onclick = guard(() => signOut(auth));
-  $("addForm").onsubmit = e => { e.preventDefault(); guard(addExpense)(); };
-  $("incForm").onsubmit = e => { e.preventDefault(); guard(addIncome)(); };
-  $("planForm").onsubmit = e => { e.preventDefault(); guard(addPlanned)(); };
-  $("recForm").onsubmit = e => { e.preventDefault(); guard(addRecurring)(); };
-  $("recIncForm").onsubmit = e => { e.preventDefault(); guard(addRecurringIncome)(); };
-  $("addCatBtn").onclick = guard(addCategory);
-  $("saveBudgets").onclick = guard(saveBudgets);
-  $("applyRec").onclick = guard(() => applyRecurringTo(recurring, "expenses", expenses, "Exp"));
-  $("applyRecIncome").onclick = guard(() => applyRecurringTo(recurringIncome, "income", income, "Inc"));
-
-  onAuthStateChanged(auth, u => {
-    user = u;
-    stopListeners();
-    if (u) {
-      $("loginCard").classList.add("hidden");
-      $("appCards").classList.remove("hidden");
-      $("who").textContent = u.email || u.displayName || "";
-      subscribeAll();
-    } else {
-      $("loginCard").classList.remove("hidden");
-      $("appCards").classList.add("hidden");
-      $("who").textContent = "";
-      expenses = []; income = []; planned = []; budgets = {}; recurring = []; recurringIncome = [];
-      categories = [...DEFAULT_CATEGORIES];
-      onCategoriesChanged();
-    }
-  });
-}
-
-// Wrap async actions so errors show in the status line instead of failing silently
-function guard(fn) {
-  return async (...args) => {
-    try { await fn(...args); }
-    catch (e) { setStatus(e.message || String(e), true); }
-  };
-}
-
-function stopListeners() {
-  unsubs.forEach(f => f()); unsubs = [];
-  monthUnsubs.forEach(f => f()); monthUnsubs = [];
-}
-
-const mapDocs = s => s.docs.map(d => ({ id: d.id, ...d.data() }));
-
-function subscribeAll() {
-  subscribeMonth();
-  unsubs.push(onSnapshot(doc(db, "users", user.uid, "settings", "categories"), s => {
-    categories = s.exists() && Array.isArray(s.data().list) ? s.data().list : [...DEFAULT_CATEGORIES];
-    onCategoriesChanged();
-  }, onErr));
-  unsubs.push(onSnapshot(doc(db, "users", user.uid, "settings", "budgets"), s => {
-    budgets = s.exists() ? s.data() : {};
-    categories.forEach(c => { $("b-" + c).value = budgets[c] ?? ""; });
-    renderMonth();
-  }, onErr));
-  unsubs.push(onSnapshot(collection(db, "users", user.uid, "recurring"), s => {
-    recurring = mapDocs(s); renderLists();
-  }, onErr));
-  unsubs.push(onSnapshot(collection(db, "users", user.uid, "recurringIncome"), s => {
-    recurringIncome = mapDocs(s); renderLists();
-  }, onErr));
-}
-
-// Listens to expenses, income and planned items for the selected month only
-function subscribeMonth() {
-  monthUnsubs.forEach(f => f()); monthUnsubs = [];
-  const start = `${selectedMonth}-01`, end = `${selectedMonth}-31`;
-  const monthQuery = name => query(
-    collection(db, "users", user.uid, name),
-    where("date", ">=", start), where("date", "<=", end),
-    orderBy("date", "desc")
-  );
-  monthUnsubs.push(onSnapshot(monthQuery("expenses"), s => {
-    expenses = mapDocs(s); renderSummary(); renderMonth(); renderLists();
-  }, onErr));
-  monthUnsubs.push(onSnapshot(monthQuery("income"), s => {
-    income = mapDocs(s); renderSummary(); renderLists();
-  }, onErr));
-  monthUnsubs.push(onSnapshot(monthQuery("planned"), s => {
-    planned = mapDocs(s); renderSummary(); renderLists();
-  }, onErr));
-}
-
-function jumpToMonth(date) {
-  if (date.slice(0, 7) !== selectedMonth) {
-    selectedMonth = date.slice(0, 7);
-    $("month").value = selectedMonth;
-    subscribeMonth();
-  }
-}
-
-// ----- Categories -----
-
-// Called whenever the category list changes (from Firestore or a local edit)
-function onCategoriesChanged() {
-  fillCategorySelects();
-  buildCategoryRows();
-  renderCategoryChips();
-  renderMonth();
-}
-
-function fillCategorySelects() {
-  ["category", "pCategory", "rCategory"].forEach(id => {
-    const sel = $(id);
-    const prev = sel.value;
-    sel.replaceChildren();
-    categories.forEach(c => sel.add(new Option(catLabel(c), c)));
-    if (categories.includes(prev)) sel.value = prev;
-  });
-}
-
-function buildCategoryRows() {
-  const wrap = $("cats");
-  wrap.replaceChildren();
-  categories.forEach(c => {
-    const row = document.createElement("div");
-    row.className = "catrow";
-
-    const line = document.createElement("div");
-    line.className = "item catline";
-    line.style.cssText = "border:0;padding:2px 0";
-    const name = document.createElement("span");
-    name.style.flex = "1";
-    name.textContent = catLabel(c);
-    const spent = document.createElement("span");
-    spent.className = "muted mono spent";
-    spent.id = "s-" + c;
-    const input = document.createElement("input");
-    input.type = "text";
-    input.inputMode = "decimal";
-    input.autocomplete = "off";
-    input.placeholder = t("phBudget");
-    input.id = "b-" + c;
-    input.className = "mono";
-    input.style.maxWidth = "120px";
-    input.value = budgets[c] ?? "";
-    line.append(name, spent, input);
-
-    const bar = document.createElement("div");
-    bar.className = "bar";
-    const fill = document.createElement("div");
-    fill.id = "bar-" + c;
-    bar.append(fill);
-
-    row.append(line, bar);
-    wrap.appendChild(row);
-  });
-}
-
-function renderCategoryChips() {
-  const box = $("catChips");
-  box.replaceChildren();
-  categories.forEach(c => {
-    const chip = document.createElement("span");
-    chip.className = "chip";
-    const label = document.createElement("span");
-    label.textContent = catLabel(c);
-    const x = document.createElement("button");
-    x.type = "button";
-    x.title = t("removeCat");
-    x.textContent = "×";
-    x.onclick = guard(() => removeCategory(c));
-    chip.append(label, x);
-    box.appendChild(chip);
-  });
-}
-
-async function addCategory() {
-  const name = $("newCat").value.trim();
-  if (!name) return;
-  // Match against both the stored name and its Bangla label, so "খাবার" can't duplicate "Food"
-  const lower = name.toLowerCase();
-  if (categories.some(c => c.toLowerCase() === lower || CAT_BN[c] === name)) {
-    setStatus(t("catExists", { name }), true);
-    return;
-  }
-  await setDoc(doc(db, "users", user.uid, "settings", "categories"), { list: [...categories, name] });
-  $("newCat").value = "";
-  setStatus(t("catAdded", { name }));
-}
-
-async function removeCategory(name) {
-  if (categories.length <= 1) { setStatus(t("keepOneCat"), true); return; }
-  if (!confirm(t("confirmRemoveCat", { name: catLabel(name) }))) return;
-  await setDoc(doc(db, "users", user.uid, "settings", "categories"), {
-    list: categories.filter(c => c !== name)
-  });
-  if (budgets[name] !== undefined) {
-    const next = { ...budgets };
-    delete next[name];
-    await setDoc(doc(db, "users", user.uid, "settings", "budgets"), next);
-  }
-  setStatus(t("catRemoved", { name: catLabel(name) }));
-}
-
-// ----- Rendering -----
-
-function renderSummary() {
-  $("monthLabel").textContent = monthName(selectedMonth);
-  const spent = sum(expenses), earned = sum(income), balance = earned - spent;
-  const plannedTotal = sum(planned), estimatedLeft = balance - plannedTotal;
-  $("incomeTotal").textContent = fmt(earned);
-  $("total").textContent = fmt(spent);
-  $("balance").textContent = signed(balance);
-  $("balance").style.color = balance < 0 ? "var(--danger)" : "var(--ok)";
-  $("planned").textContent = fmt(plannedTotal);
-  $("afterPlanned").textContent = signed(estimatedLeft);
-  $("afterPlanned").style.color = estimatedLeft < 0 ? "var(--danger)" : "var(--ok)";
-}
-
-function spentByCategory() {
-  const byCat = {};
-  expenses.forEach(e => { byCat[e.category] = (byCat[e.category] || 0) + Number(e.amount); });
-  return byCat;
-}
-function isOverBudget(c, byCat) { const b = Number(budgets[c]) || 0; return b > 0 && (byCat[c] || 0) > b; }
-
-function renderBadges() {
-  const count = (id, n) => { $(id).textContent = n ? fmtInt(n) : ""; };
-  count("badge-expenses", expenses.length);
-  count("badge-income", income.length);
-  count("badge-planned", planned.length);
-  const byCat = spentByCategory();
-  const over = categories.some(c => isOverBudget(c, byCat));
-  $("badge-budgets").classList.toggle("dot", over);
-  document.querySelector('.tab[data-tab="budgets"]').setAttribute("aria-label", over ? t("budgetsOverAria") : t("tabBudgets"));
-}
-
-function renderMonth() {
-  const total = sum(expenses);
-  const byCat = spentByCategory();
-
-  categories.forEach(c => {
-    const spentAmt = byCat[c] || 0;
-    const budget = Number(budgets[c]) || 0;
-    const label = $("s-" + c);
-    const bar = $("bar-" + c);
-    if (!label || !bar) return;
-    let text = fmt(spentAmt);
-    if (budget) {
-      text = t(spentAmt > budget ? "budgetOver" : "budgetLeft",
-        { spent: fmt(spentAmt), budget: fmt(budget), diff: fmt(Math.abs(spentAmt - budget)) });
-    }
-    label.textContent = text;
-    // With a budget: bar = share of budget used. Without: bar = share of this month's spending.
-    const pct = budget ? Math.min(100, spentAmt / budget * 100) : (total ? spentAmt / total * 100 : 0);
-    bar.style.width = pct + "%";
-    bar.className = isOverBudget(c, byCat) ? "over" : "";
-  });
-  renderBadges();
-}
-
-// Shared renderer for every list: items are {title, sub, amount, onDelete, onAction?, actionLabel?}
-function renderRows(boxId, items, emptyMsg) {
-  const box = $(boxId);
-  box.replaceChildren();
-  if (!items.length) { box.className = "muted"; box.textContent = emptyMsg; return; }
-  box.className = "";
-  items.forEach(it => {
-    const row = document.createElement("div");
-    row.className = "item entry";
-    const info = document.createElement("div");
-    info.className = "info";
-    const t = document.createElement("div");
-    t.textContent = it.title;
-    const d = document.createElement("div");
-    d.className = "muted";
-    d.textContent = it.sub;
-    info.append(t, d);
-    const amt = document.createElement("span");
-    amt.className = "amt";
-    amt.textContent = fmt(it.amount);
-    const actions = document.createElement("div");
-    actions.className = "actions";
-    if (it.onAction) {
-      const act = document.createElement("button");
-      act.className = "small ghost";
-      act.textContent = it.actionLabel;
-      act.onclick = guard(it.onAction);
-      actions.append(act);
-    }
-    const del = document.createElement("button");
-    del.className = "small danger";
-    del.textContent = t("delete");
-    del.onclick = guard(it.onDelete);
-    actions.append(del);
-    row.append(info, amt, actions);
-    box.appendChild(row);
-  });
-}
-
-function renderLists() {
-  renderRows("list", expenses.map(e => ({
-    title: catLabel(e.category) + (e.note ? " · " + e.note : ""), sub: fmtDate(e.date), amount: e.amount,
-    onDelete: () => removeItem("expenses", e.id, t("confirmDelExpense"))
-  })), t("noExpenses"));
-
-  renderRows("incomeList", income.map(i => ({
-    title: i.note || t("income"), sub: fmtDate(i.date), amount: i.amount,
-    onDelete: () => removeItem("income", i.id, t("confirmDelIncome"))
-  })), t("noIncome"));
-
-  renderRows("plannedList", planned.map(p => ({
-    title: catLabel(p.category) + (p.note ? " · " + p.note : ""), sub: fmtDate(p.date), amount: p.amount,
-    actionLabel: t("markSpent"), onAction: () => markSpent(p),
-    onDelete: () => removeItem("planned", p.id, t("confirmDelPlanned"))
-  })), t("noPlanned"));
-
-  renderRows("recurring", recurring.map(r => ({
-    title: r.note || catLabel(r.category), sub: `${catLabel(r.category)} · ${t("dayOfMonth", { day: fmtInt(r.day) })}`, amount: r.amount,
-    onDelete: () => removeItem("recurring", r.id, t("confirmDelRec"))
-  })), t("noRecurring"));
-
-  renderRows("recurringIncome", recurringIncome.map(r => ({
-    title: r.note || t("income"), sub: t("dayOfMonth", { day: fmtInt(r.day) }), amount: r.amount,
-    onDelete: () => removeItem("recurringIncome", r.id, t("confirmDelRecInc"))
-  })), t("noRecurringIncome"));
-  renderBadges();
-}
-
-// ----- Writes -----
-
-async function removeItem(col, id, message) {
-  if (!confirm(message)) return;
-  await deleteDoc(doc(db, "users", user.uid, col, id));
-}
-
-async function addExpense() {
-  const amount = parseNum($("amount").value);
-  const date = $("date").value;
-  if (!(amount > 0)) { setStatus(t("invalidAmount"), true); return; }
-  if (!date) return;
-  await addDoc(collection(db, "users", user.uid, "expenses"), {
-    amount, category: $("category").value, date,
-    note: $("note").value.trim(), recurringId: null, createdAt: Date.now()
-  });
-  jumpToMonth(date);
-  $("amount").value = "";
-  $("note").value = "";
-  setStatus(t("expenseAdded"));
-}
-
-async function addIncome() {
-  const amount = parseNum($("iAmount").value);
-  const date = $("iDate").value;
-  if (!(amount > 0)) { setStatus(t("invalidAmount"), true); return; }
-  if (!date) return;
-  await addDoc(collection(db, "users", user.uid, "income"), {
-    amount, date, note: $("iNote").value.trim(), recurringId: null, createdAt: Date.now()
-  });
-  jumpToMonth(date);
-  $("iAmount").value = "";
-  $("iNote").value = "";
-  setStatus(t("incomeAdded"));
-}
-
-async function addPlanned() {
-  const amount = parseNum($("pAmount").value);
-  const date = $("pDate").value;
-  if (!(amount > 0)) { setStatus(t("invalidAmount"), true); return; }
-  if (!date) return;
-  await addDoc(collection(db, "users", user.uid, "planned"), {
-    amount, category: $("pCategory").value, date, note: $("pNote").value.trim(), createdAt: Date.now()
-  });
-  jumpToMonth(date);
-  $("pAmount").value = "";
-  $("pNote").value = "";
-  setStatus(t("plannedAdded"));
-}
-
-// Turns a planned item into a real expense, then removes it from the plan
-async function markSpent(p) {
-  await addDoc(collection(db, "users", user.uid, "expenses"), {
-    amount: p.amount, category: p.category, date: p.date,
-    note: p.note || "", recurringId: null, createdAt: Date.now()
-  });
-  await deleteDoc(doc(db, "users", user.uid, "planned", p.id));
-  setStatus(t("movedToExpenses"));
-}
-
-async function saveBudgets() {
-  const obj = {};
-  categories.forEach(c => {
-    const v = parseNum($("b-" + c).value);
-    if (v > 0) obj[c] = v;
-  });
-  await setDoc(doc(db, "users", user.uid, "settings", "budgets"), obj);
-  setStatus(t("budgetsSaved"));
-}
-
-async function addRecurring() {
-  const amount = parseNum($("rAmount").value);
-  const day = parseDay($("rDay").value);
-  if (!(amount > 0)) { setStatus(t("invalidAmount"), true); return; }
-  if (!day) { setStatus(t("invalidDay"), true); return; }
-  await addDoc(collection(db, "users", user.uid, "recurring"), {
-    amount, category: $("rCategory").value, day, note: $("rNote").value.trim()
-  });
-  $("rAmount").value = "";
-  $("rNote").value = "";
-  setStatus(t("recSaved"));
-}
-
-async function addRecurringIncome() {
-  const amount = parseNum($("riAmount").value);
-  const day = parseDay($("riDay").value);
-  if (!(amount > 0)) { setStatus(t("invalidAmount"), true); return; }
-  if (!day) { setStatus(t("invalidDay"), true); return; }
-  await addDoc(collection(db, "users", user.uid, "recurringIncome"), {
-    amount, day, note: $("riNote").value.trim()
-  });
-  $("riAmount").value = "";
-  $("riNote").value = "";
-  setStatus(t("recIncSaved"));
-}
-
-// Creates one entry per recurring rule for the selected month, skipping any already created
-async function applyRecurringTo(rules, col, existing, kind) {
-  const [y, m] = selectedMonth.split("-").map(Number);
-  const daysInMonth = new Date(y, m, 0).getDate();
-  let added = 0;
-  for (const r of rules) {
-    if (existing.some(x => x.recurringId === r.id)) continue;
-    const day = Math.min(r.day, daysInMonth);
-    await addDoc(collection(db, "users", user.uid, col), {
-      amount: r.amount, category: r.category || "Income", note: r.note || "",
-      date: `${selectedMonth}-${pad(day)}`, recurringId: r.id, createdAt: Date.now()
-    });
-    added++;
-  }
-  setStatus(added ? t("applied" + kind, { n: fmtInt(added), month: monthName(selectedMonth) }) : t("nothing" + kind));
-}
-</script>
+<script type="module" src="app.js"></script>
 </body>
 </html>

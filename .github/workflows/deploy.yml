@@ -19,10 +19,12 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Syntax check the script
+      - name: Syntax check the scripts
         run: |
-          awk '/<script type="module">/{f=1;next}/<\/script>/{f=0}f' index.html > app.mjs
-          node --check app.mjs
+          # .mjs copies so node parses them as ES modules
+          for f in app.js i18n.js; do cp "$f" "$RUNNER_TEMP/${f%.js}.mjs"; node --check "$RUNNER_TEMP/${f%.js}.mjs"; done
+          node --check sw.js
+          node -e 'JSON.parse(require("fs").readFileSync("manifest.webmanifest", "utf8"))'
 
   deploy:
     needs: check
