@@ -169,14 +169,12 @@ function periodLabel(key, sd = startDay) {
   const f = new Intl.DateTimeFormat(LOCALES[lang], opts);
   return f.formatRange ? f.formatRange(parseISO(start), parseISO(end)) : `${f.format(parseISO(start))} – ${f.format(parseISO(end))}`;
 }
-// The month button's label in two parts: { main: "November", sub: "2026" } (localized through formatToParts, so
-// Bangla gets "নভেম্বর" / "২০২৬"). Salary cycles keep their range as the main part, with no sub.
-function periodParts(key, sd = startDay) {
-  if (sd !== 1) return { main: periodLabel(key, sd), sub: "" };
+// The month chip's label: "Nov 2026" for calendar months (localized, so Bangla gets its own short form);
+// salary cycles keep their range ("25 Nov – 24 Dec")
+function periodShort(key, sd = startDay) {
+  if (sd !== 1) return periodLabel(key, sd);
   const [y, m] = key.split("-").map(Number);
-  const parts = new Intl.DateTimeFormat(LOCALES[lang], { month: "long", year: "numeric" }).formatToParts(new Date(y, m - 1, 1));
-  const month = parts.find(x => x.type === "month")?.value, year = parts.find(x => x.type === "year")?.value;
-  return month && year ? { main: month, sub: year } : { main: monthName(key), sub: "" };
+  return new Date(y, m - 1, 1).toLocaleString(LOCALES[lang], { month: "short", year: "numeric" });
 }
 function dayLabel(iso) {
   const today = new Date(); const yest = new Date(today.getFullYear(), today.getMonth(), today.getDate() - 1);
@@ -1449,8 +1447,8 @@ function loanState() {
 const loanFlowNow = () => { const { start, end } = currentRange(); return flowBetween(loanState().states, start, end); };
 
 function renderSummary(animate) {
-  const { main, sub } = periodParts(selectedMonth);
-  $("monthLabel").replaceChildren(h("span", { class: "ml-main", text: main }), sub ? h("span", { class: "ml-sub", text: sub }) : null);
+  $("monthLabel").textContent = periodShort(selectedMonth);
+  $("monthBtn").setAttribute("aria-label", `${t("pickMonth")}: ${periodLabel(selectedMonth)}`);
   const spent = sum(expenses), earned = sum(income), plannedTotal = sum(planned);
   // Cash view: loan money that moved this period counts (borrowed/repaid to you in, lent/repaid by you out).
   // Spending itself is only ever the expenses, so budgets and categories never see loans.
