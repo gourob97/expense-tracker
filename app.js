@@ -356,6 +356,10 @@ function openCycleDialog() {
   sel.focus();
 }
 
+// Phone insights card remembers open/closed on this device
+try { $("insightsCard").open = localStorage.getItem("insightsOpen") === "1"; } catch (e) {}
+$("insightsCard").addEventListener("toggle", e => { try { localStorage.setItem("insightsOpen", e.currentTarget.open ? "1" : "0"); } catch (err) {} });
+
 $("accountBtn").onclick = e => openAccountMenu(e.currentTarget);
 $("accountBtnSide").onclick = e => openAccountMenu(e.currentTarget);
 
@@ -901,13 +905,17 @@ function renderSide() {
     const rows = top.map(([c, v]) => ({ name: catLabel(c), v, tone: catStyle(c).tone }));
     if (rest.length) rows.push({ name: rest.length === 1 ? catLabel(rest[0][0]) : t("moreCats", { n: fmtInt(rest.length) }), v: restSum, tone: 7 });
     const pct = v => Math.round(v / total * 100);
-    where.replaceChildren(
-      h("div", { class: "where-bar", role: "img", "aria-label": rows.map(r => `${r.name} ${fmtInt(pct(r.v))}%`).join(", ") },
-        rows.map(r => h("span", { class: `tone-${r.tone}`, style: `width:${r.v / total * 100}%` }))),
-      h("div", { class: "where-list" }, rows.map(r => h("div", { class: "where-row" },
-        h("span", { class: `dot tone-${r.tone}` }), h("span", { class: "name", text: r.name }),
-        h("span", { class: "pct", text: fmtInt(pct(r.v)) + "%" }), h("span", { class: "amt num", text: fmt(r.v) })))));
+    const bar = h("div", { class: "where-bar", role: "img", "aria-label": rows.map(r => `${r.name} ${fmtInt(pct(r.v))}%`).join(", ") },
+      rows.map(r => h("span", { class: `tone-${r.tone}`, style: `width:${r.v / total * 100}%` })));
+    const list = h("div", { class: "where-list" }, rows.map(r => h("div", { class: "where-row" },
+      h("span", { class: `dot tone-${r.tone}` }), h("span", { class: "name", text: r.name }),
+      h("span", { class: "pct", text: fmtInt(pct(r.v)) + "%" }), h("span", { class: "amt num", text: fmt(r.v) }))));
+    where.replaceChildren(bar, list);
+    // Phone insights card shows the same nodes (static markup, no listeners, so clones are safe)
+    $("insightsBar").replaceChildren(bar.cloneNode(true));
+    $("insightsList").replaceChildren(list.cloneNode(true));
   }
+  $("insightsCard").hidden = !total;
 
   // Budget watch: over or close to the limit
   const watch = categories.map(c => budgetInfo(c, byCat)).filter(i => i.over || i.near).sort((a, b) => b.ratio - a.ratio).slice(0, 3);
@@ -941,8 +949,8 @@ function renderChart() {
   const range = currentRange(), dim = range.days;
   const dateAt = i => addDays(range.start, i - 1); // 1-based day of the period → ISO date
   const budgetTotal = categories.reduce((acc, c) => acc + (Number(budgets[c]) || 0), 0);
-  $("chartPaceLegend").hidden = !budgetTotal;
-  $("chartPaceText").textContent = t("chartPace", { amt: fmt(budgetTotal) });
+  $("chartPaceLegend").hidden = $("mChartPaceLegend").hidden = !budgetTotal;
+  $("chartPaceText").textContent = $("mChartPaceText").textContent = t("chartPace", { amt: fmt(budgetTotal) });
   if (!expenses.length) { box.replaceChildren(h("p", { class: "muted chart-empty", text: t("noExpenses") })); return; }
 
   const daily = new Array(dim).fill(0);
@@ -980,6 +988,7 @@ function renderChart() {
         tip)),
     h("div", { class: "chart-x", "aria-hidden": "true" }, xDays.map((d, i) =>
       h("span", { text: i === 0 || i === xDays.length - 1 ? fmtDate(dateAt(d)) : fmtInt(Number(dateAt(d).slice(8, 10))) }))));
+  $("mChart").replaceChildren(...[...box.childNodes].map(n => n.cloneNode(true)));
 }
 
 // ===== Writes =====
