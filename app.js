@@ -1941,8 +1941,8 @@ function renderChart() {
   if (unchanged(box, expenses.map(e => [e.date, e.amount]), budgetTotal, range, lang, todayISO())) return;
   if (!expenses.length) { box.replaceChildren(h("p", { class: "muted chart-empty", text: t("noExpenses") })); return; }
 
-  const daily = new Array(dim).fill(0);
-  expenses.forEach(e => { const i = daysBetween(range.start, e.date); if (i >= 0 && i < dim) daily[i] += Number(e.amount); });
+  const daily = new Array(dim).fill(0), counts = new Array(dim).fill(0);
+  expenses.forEach(e => { const i = daysBetween(range.start, e.date); if (i >= 0 && i < dim) { daily[i] += Number(e.amount); counts[i]++; } });
   const today = todayISO();
   const lastWithData = daily.reduce((acc, v, i) => (v ? i + 1 : acc), 0);
   const elapsed = inPeriod(today, range) ? daysBetween(range.start, today) + 1 : today > range.end ? dim : 0;
@@ -1977,6 +1977,73 @@ function renderChart() {
     h("div", { class: "chart-x", "aria-hidden": "true" }, xDays.map((d, i) =>
       h("span", { text: i === 0 || i === xDays.length - 1 ? fmtDate(dateAt(d)) : fmtInt(Number(dateAt(d).slice(8, 10))) }))));
   $("mChart").replaceChildren(...[...box.childNodes].map(n => n.cloneNode(true)));
+  // Clones carry no listeners, so both charts get their own scrubber
+  const model = { daily, counts, cum, end, dim, dateAt, budgetTotal, x, yv, W, H };
+  [box, $("mChart")].forEach(b => attachScrub(b.querySelector(".chart-plot"), model));
+}
+
+// Scrubbing: touch and slide (or hover with a mouse, or arrow keys) to see any day up to today:
+// that day's spending, the running total and, with budgets, how it stands against the pace line.
+// Sideways drags scrub; up/down swipes still scroll the page (touch-action: pan-y). Lifting the finger hides it.
+function attachScrub(plot, m) {
+  const guide = h("span", { class: "chart-guide", "aria-hidden": "true" });
+  const dot = h("span", { class: "chart-sdot", "aria-hidden": "true" });
+  const card = h("div", { class: "chart-scard", "aria-live": "polite" });
+  plot.append(guide, dot, card);
+  plot.tabIndex = 0;
+  plot.setAttribute("role", "group");
+  plot.setAttribute("aria-label", t("chartScrub"));
+  let day = 0, dragging = false, touch = false;
+  const show = d => {
+    d = Math.max(1, Math.min(m.end, d));
+    if (d === day) return;
+    if (day && touch) try { navigator.vibrate?.(5); } catch (e) { /* not allowed here */ }
+    day = d;
+    const total = m.cum[d - 1], spent = m.daily[d - 1], n = m.counts[d - 1];
+    const leftPct = m.x(d) / m.W * 100, topPct = m.yv(total) / m.H * 100;
+    guide.style.left = dot.style.left = `${leftPct}%`;
+    dot.style.top = `${topPct}%`;
+    card.classList.toggle("low", topPct < 45); // keep the card away from the dot vertically
+    let pace = null;
+    if (m.budgetTotal) {
+      const diff = Math.round(total - m.budgetTotal * (m.dim > 1 ? (d - 1) / (m.dim - 1) : 1));
+      pace = h("div", { class: `sc-pace ${diff > 0 ? "over" : "under"}`,
+        text: Math.abs(diff) < 1 ? t("chartOnPace") : t(diff > 0 ? "chartOver" : "chartUnder", { amt: fmt(Math.abs(diff)) }) });
+    }
+    card.replaceChildren(
+      h("div", { class: "sc-date", text: dayLabel(m.dateAt(d)) }),
+      h("div", { class: "sc-day", text: spent ? `${t("chartDayAmt", { amt: fmt(spent) })} · ${plural(n, "chartOneExp", "chartNExp")}` : t("chartNoSpend") }),
+      h("div", { class: "sc-total", text: t("chartSoFar", { amt: fmt(total) }) }),
+      pace);
+    plot.classList.add("scrubbing");
+    // Beside the line: to its right if the card fits there, else to its left, always inside the chart
+    const pw = plot.clientWidth, cw = card.offsetWidth, gx = leftPct / 100 * pw, gap = 10;
+    const at = gx + gap + cw <= pw ? gx + gap : gx - gap - cw;
+    card.style.left = `${Math.max(0, Math.min(pw - cw, at))}px`;
+  };
+  const hide = () => { day = 0; dragging = false; plot.classList.remove("scrubbing"); card.replaceChildren(); };
+  const dayAt = e => {
+    const r = plot.getBoundingClientRect();
+    return Math.round(Math.min(1, Math.max(0, (e.clientX - r.left) / r.width)) * (m.dim - 1)) + 1;
+  };
+  plot.addEventListener("pointerdown", e => {
+    if (e.button > 0) return;
+    dragging = true; touch = e.pointerType !== "mouse";
+    try { plot.setPointerCapture(e.pointerId); } catch (err) { /* pointer already gone */ }
+    show(dayAt(e));
+  });
+  plot.addEventListener("pointermove", e => { if (dragging || e.pointerType === "mouse") { touch = e.pointerType !== "mouse"; show(dayAt(e)); } });
+  plot.addEventListener("pointerup", e => { if (e.pointerType === "mouse") dragging = false; else hide(); });
+  plot.addEventListener("pointercancel", hide); // e.g. the browser took over for a vertical scroll
+  plot.addEventListener("pointerleave", e => { if (e.pointerType === "mouse" && !dragging) hide(); });
+  plot.addEventListener("keydown", e => {
+    const step = { ArrowLeft: -1, ArrowRight: 1 }[e.key];
+    if (step) { e.preventDefault(); touch = false; show((day || m.end) + (day ? step : 0)); }
+    else if (e.key === "Home") { e.preventDefault(); show(1); }
+    else if (e.key === "End") { e.preventDefault(); show(m.end); }
+    else if (e.key === "Escape" && day) { e.preventDefault(); hide(); }
+  });
+  plot.addEventListener("blur", hide);
 }
 
 // ===== Writes =====

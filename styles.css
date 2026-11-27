@@ -388,6 +388,26 @@ button.brow:hover { background: var(--surface-2) }
 .chart-tip { position: absolute; transform: translate(-100%, -135%); margin-left: -8px; white-space: nowrap; background: var(--text); color: var(--bg); border-radius: 8px; padding: 5px 9px; font-size: 12px; font-weight: 600 }
 .chart-x { display: flex; justify-content: space-between; padding-left: 50px; margin-top: 8px; font-size: 11px; color: var(--muted) }
 .chart-empty { margin: 0; padding: 40px 0; text-align: center }
+/* Scrubbing: a guide line, a dot on the spending line and a card for the day under the finger or pointer */
+.chart-plot { touch-action: pan-y; -webkit-user-select: none; user-select: none; -webkit-tap-highlight-color: transparent; cursor: crosshair; border-radius: 4px }
+.chart-plot:focus { outline: none }
+.chart-plot:focus-visible { outline: 2px solid var(--accent); outline-offset: 6px }
+.chart-guide, .chart-sdot, .chart-scard { display: none; pointer-events: none }
+.chart-plot.scrubbing .chart-guide, .chart-plot.scrubbing .chart-sdot, .chart-plot.scrubbing .chart-scard { display: block }
+.chart-plot.scrubbing > .chart-dot, .chart-plot.scrubbing > .chart-tip { display: none }
+.chart-guide { position: absolute; top: 0; bottom: 0; width: 0; border-left: 1.5px solid var(--text-2); opacity: .55 }
+.chart-sdot { position: absolute; width: 14px; height: 14px; margin: -7px 0 0 -7px; border-radius: 50%; background: var(--accent-text); border: 3px solid var(--surface); box-shadow: 0 0 0 1px var(--accent-text) }
+.chart-scard {
+  position: absolute; top: 0; z-index: 2; min-width: 132px; padding: 8px 10px;
+  background: var(--surface-2); border: 1px solid var(--line-2); border-radius: 10px; box-shadow: var(--shadow);
+  font-size: 12px; line-height: 1.45; white-space: nowrap
+}
+.chart-scard.low { top: auto; bottom: 0 }
+.sc-date { font-size: 11px; font-weight: 600; color: var(--muted) }
+.sc-day { font-size: 13px; font-weight: 700; color: var(--text) }
+.sc-total { color: var(--text-2) }
+.sc-pace.under { color: var(--ok) }
+.sc-pace.over { color: var(--danger) }
 
 /* ===== Entry sheet ===== */
 dialog.sheet {
