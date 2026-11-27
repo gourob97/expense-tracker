@@ -2,7 +2,7 @@
 <html lang="en" data-theme="dark">
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>Expense Tracker</title>
 <style>
 :root{--bg:#0b0d10;--panel:#11141a;--line:#1e232b;--text:#d7dce4;--muted:#6b7480;--accent:#f0b429;--danger:#f87171;--ok:#4ade80;--input:#0b0d10;--accent-ink:#0b0d10}
@@ -43,7 +43,23 @@ input:focus,select:focus{outline:1px solid var(--accent);border-color:var(--acce
 .chip{display:inline-flex;align-items:center;gap:6px;border:1px solid var(--line);border-radius:3px;padding:3px 4px 3px 8px;font-size:12px}
 .chip button{padding:0 6px;background:transparent;color:var(--muted);border:0;font-size:14px;line-height:1}
 .hidden{display:none!important}
-#status{min-height:1em;font-size:12px}
+#status{position:fixed;left:50%;bottom:16px;transform:translateX(-50%);z-index:20;max-width:calc(100% - 32px);font-size:12px;background:var(--panel);border:1px solid var(--line);border-radius:4px;padding:8px 12px;box-shadow:0 4px 16px rgba(0,0,0,.25);cursor:pointer}
+#status:empty{display:none}
+.tabs{display:flex;gap:4px;position:sticky;top:0;z-index:10;background:var(--bg);border-bottom:1px solid var(--line)}
+.tab{flex:1 1 0;display:inline-flex;align-items:center;justify-content:center;gap:6px;background:transparent;color:var(--muted);border:0;border-bottom:2px solid transparent;border-radius:0;padding:11px 6px;font-size:11px;letter-spacing:.1em;text-transform:uppercase}
+.tab:hover{color:var(--text)}
+.tab[aria-current="page"]{color:var(--text);border-bottom-color:var(--accent)}
+.badge{font-family:ui-monospace,Menlo,monospace;font-size:10px;letter-spacing:0;line-height:1;padding:2px 6px;border-radius:8px;background:var(--line);color:var(--text)}
+.badge:empty:not(.dot){display:none}
+.badge.dot{width:7px;height:7px;padding:0;background:var(--danger)}
+@media(min-width:800px){.grid.two>.span2{grid-row:span 2}}
+@media(max-width:599px){
+  main{padding-bottom:calc(76px + env(safe-area-inset-bottom))}
+  .tabs{position:fixed;left:0;right:0;top:auto;bottom:0;gap:0;background:var(--panel);border-bottom:0;border-top:1px solid var(--line);padding-bottom:env(safe-area-inset-bottom)}
+  .tab{flex-direction:column;justify-content:flex-start;gap:4px;padding:10px 2px 12px;border-bottom:0;border-top:2px solid transparent}
+  .tab[aria-current="page"]{border-top-color:var(--accent)}
+  #status{bottom:calc(72px + env(safe-area-inset-bottom))}
+}
 </style>
 </head>
 <body>
@@ -84,7 +100,14 @@ input:focus,select:focus{outline:1px solid var(--accent);border-color:var(--acce
       <p class="muted" style="margin:10px 0 0">Estimated left = balance minus everything you've planned this month.</p>
     </section>
 
-    <div class="grid two">
+    <nav class="tabs" aria-label="Sections">
+      <button type="button" class="tab" data-tab="expenses">Expenses<span class="badge" id="badge-expenses"></span></button>
+      <button type="button" class="tab" data-tab="income">Income<span class="badge" id="badge-income"></span></button>
+      <button type="button" class="tab" data-tab="planned">Planned<span class="badge" id="badge-planned"></span></button>
+      <button type="button" class="tab" data-tab="budgets">Budgets<span class="badge" id="badge-budgets" title="A category is over budget"></span></button>
+    </nav>
+
+    <div class="tab-panel grid two" data-panel="expenses">
       <section class="panel">
         <h2>Add expense</h2>
         <form id="addForm" class="grid" style="gap:8px">
@@ -95,7 +118,24 @@ input:focus,select:focus{outline:1px solid var(--accent);border-color:var(--acce
           <button type="submit">Add expense</button>
         </form>
       </section>
+      <section class="panel span2">
+        <h2>Expenses this month</h2>
+        <div id="list"></div>
+      </section>
+      <section class="panel">
+        <h2>Recurring expenses</h2>
+        <div id="recurring"></div>
+        <form id="recForm" class="grid" style="gap:8px;margin-top:12px">
+          <input type="number" id="rAmount" class="mono" placeholder="Amount (৳)" min="0" step="0.01" required>
+          <select id="rCategory"></select>
+          <input type="number" id="rDay" class="mono" placeholder="Day of month" min="1" max="31" value="1" required>
+          <input type="text" id="rNote" placeholder="Name, e.g. House rent">
+          <div class="row"><button type="submit">Add</button><button class="ghost" type="button" id="applyRec">Apply to this month</button></div>
+        </form>
+      </section>
+    </div>
 
+    <div class="tab-panel grid two hidden" data-panel="income">
       <section class="panel">
         <h2>Add income</h2>
         <form id="incForm" class="grid" style="gap:8px">
@@ -105,20 +145,23 @@ input:focus,select:focus{outline:1px solid var(--accent);border-color:var(--acce
           <button type="submit">Add income</button>
         </form>
       </section>
-    </div>
-
-    <div class="grid two">
-      <section class="panel">
-        <h2>Expenses this month</h2>
-        <div id="list"></div>
-      </section>
-      <section class="panel">
+      <section class="panel span2">
         <h2>Income this month</h2>
         <div id="incomeList"></div>
       </section>
+      <section class="panel">
+        <h2>Recurring income</h2>
+        <div id="recurringIncome"></div>
+        <form id="recIncForm" class="grid" style="gap:8px;margin-top:12px">
+          <input type="number" id="riAmount" class="mono" placeholder="Amount (৳)" min="0" step="0.01" required>
+          <input type="number" id="riDay" class="mono" placeholder="Day of month" min="1" max="31" value="1" required>
+          <input type="text" id="riNote" placeholder="Name, e.g. Monthly salary">
+          <div class="row"><button type="submit">Add</button><button class="ghost" type="button" id="applyRecIncome">Apply to this month</button></div>
+        </form>
+      </section>
     </div>
 
-    <div class="grid two">
+    <div class="tab-panel grid hidden" data-panel="planned">
       <section class="panel">
         <h2>Planned spending</h2>
         <p class="muted" style="margin:0 0 6px">Costs you intend to make this month. "Mark spent" turns one into a real expense.</p>
@@ -131,7 +174,9 @@ input:focus,select:focus{outline:1px solid var(--accent);border-color:var(--acce
           <button type="submit">Add planned</button>
         </form>
       </section>
+    </div>
 
+    <div class="tab-panel grid hidden" data-panel="budgets">
       <section class="panel">
         <h2>Categories &amp; budgets</h2>
         <div class="row" style="margin-bottom:10px">
@@ -144,34 +189,9 @@ input:focus,select:focus{outline:1px solid var(--accent);border-color:var(--acce
         <div class="row" style="margin-top:12px"><button id="saveBudgets">Save budgets</button></div>
       </section>
     </div>
-
-    <div class="grid two">
-      <section class="panel">
-        <h2>Recurring expenses</h2>
-        <div id="recurring"></div>
-        <form id="recForm" class="grid" style="gap:8px;margin-top:12px">
-          <input type="number" id="rAmount" class="mono" placeholder="Amount (৳)" min="0" step="0.01" required>
-          <select id="rCategory"></select>
-          <input type="number" id="rDay" class="mono" placeholder="Day of month" min="1" max="31" value="1" required>
-          <input type="text" id="rNote" placeholder="Name, e.g. House rent">
-          <div class="row"><button type="submit">Add</button><button class="ghost" type="button" id="applyRec">Apply to this month</button></div>
-        </form>
-      </section>
-
-      <section class="panel">
-        <h2>Recurring income</h2>
-        <div id="recurringIncome"></div>
-        <form id="recIncForm" class="grid" style="gap:8px;margin-top:12px">
-          <input type="number" id="riAmount" class="mono" placeholder="Amount (৳)" min="0" step="0.01" required>
-          <input type="number" id="riDay" class="mono" placeholder="Day of month" min="1" max="31" value="1" required>
-          <input type="text" id="riNote" placeholder="Name, e.g. Monthly salary">
-          <div class="row"><button type="submit">Add</button><button class="ghost" type="button" id="applyRecIncome">Apply to this month</button></div>
-        </form>
-      </section>
-    </div>
   </div>
 
-  <p id="status" class="muted"></p>
+  <p id="status" class="muted" role="status" aria-live="polite" title="Click to dismiss"></p>
 </main>
 
 <script type="module">
@@ -195,7 +215,16 @@ const todayISO = () => { const d = new Date(); return `${d.getFullYear()}-${pad(
 const fmt = n => "৳" + Number(n || 0).toLocaleString("en-US", { maximumFractionDigits: 2 });
 const signed = n => (n < 0 ? "-" : "") + fmt(Math.abs(n));
 const sum = arr => arr.reduce((s, x) => s + Number(x.amount), 0);
-const setStatus = (msg, isErr) => { const s = $("status"); s.textContent = msg || ""; s.style.color = isErr ? "var(--danger)" : ""; };
+// Status toast: confirmations clear after 4s, errors stay until clicked or replaced
+let statusTimer;
+const setStatus = (msg, isErr) => {
+  const s = $("status");
+  clearTimeout(statusTimer);
+  s.textContent = msg || "";
+  s.style.color = isErr ? "var(--danger)" : "";
+  if (msg && !isErr) statusTimer = setTimeout(() => { s.textContent = ""; }, 4000);
+};
+$("status").onclick = () => setStatus("");
 const onErr = e => setStatus(e.message, true);
 
 // ----- Theme (dark by default; choice is remembered on this device) -----
@@ -214,6 +243,35 @@ $("themeBtn").onclick = () => {
   applyTheme(next);
 };
 initTheme();
+
+// ----- Tabs (state lives in the URL hash as #/name so reload and back/forward work) -----
+const TABS = ["expenses", "income", "planned", "budgets"];
+const tabFromHash = () => location.hash.replace(/^#\/?/, "");
+function showTab(name) {
+  if (!TABS.includes(name)) name = TABS[0];
+  document.querySelectorAll(".tab-panel").forEach(p => p.classList.toggle("hidden", p.dataset.panel !== name));
+  document.querySelectorAll(".tab").forEach(b => {
+    if (b.dataset.tab === name) b.setAttribute("aria-current", "page");
+    else b.removeAttribute("aria-current");
+  });
+  return name;
+}
+// After switching, make sure the new panel's top isn't scrolled out of view
+function revealPanel(name) {
+  const nav = document.querySelector(".tabs");
+  const panel = document.querySelector(`.tab-panel[data-panel="${name}"]`);
+  const offset = getComputedStyle(nav).position === "sticky" ? nav.offsetHeight : 0;
+  const top = panel.getBoundingClientRect().top;
+  if (top < offset) window.scrollBy(0, top - offset - 12);
+}
+function initTabs() {
+  document.querySelectorAll(".tab").forEach(b => {
+    b.onclick = () => { location.hash = "/" + b.dataset.tab; };
+  });
+  window.addEventListener("hashchange", () => revealPanel(showTab(tabFromHash())));
+  showTab(tabFromHash());
+}
+initTabs();
 
 // ----- State -----
 let selectedMonth = todayISO().slice(0, 7);
@@ -454,10 +512,27 @@ function renderSummary() {
   $("afterPlanned").style.color = estimatedLeft < 0 ? "var(--danger)" : "var(--ok)";
 }
 
-function renderMonth() {
-  const total = sum(expenses);
+function spentByCategory() {
   const byCat = {};
   expenses.forEach(e => { byCat[e.category] = (byCat[e.category] || 0) + Number(e.amount); });
+  return byCat;
+}
+const isOverBudget = (c, byCat) => { const b = Number(budgets[c]) || 0; return b > 0 && (byCat[c] || 0) > b; };
+
+function renderBadges() {
+  const count = (id, n) => { $(id).textContent = n || ""; };
+  count("badge-expenses", expenses.length);
+  count("badge-income", income.length);
+  count("badge-planned", planned.length);
+  const byCat = spentByCategory();
+  const over = categories.some(c => isOverBudget(c, byCat));
+  $("badge-budgets").classList.toggle("dot", over);
+  document.querySelector('.tab[data-tab="budgets"]').setAttribute("aria-label", over ? "Budgets, over budget" : "Budgets");
+}
+
+function renderMonth() {
+  const total = sum(expenses);
+  const byCat = spentByCategory();
 
   categories.forEach(c => {
     const spentAmt = byCat[c] || 0;
@@ -473,8 +548,9 @@ function renderMonth() {
     // With a budget: bar = share of budget used. Without: bar = share of this month's spending.
     const pct = budget ? Math.min(100, spentAmt / budget * 100) : (total ? spentAmt / total * 100 : 0);
     bar.style.width = pct + "%";
-    bar.className = budget && spentAmt > budget ? "over" : "";
+    bar.className = isOverBudget(c, byCat) ? "over" : "";
   });
+  renderBadges();
 }
 
 // Shared renderer for every list: items are {title, sub, amount, onDelete, onAction?, actionLabel?}
@@ -542,6 +618,7 @@ function renderLists() {
     title: r.note || "Income", sub: `day ${r.day} of each month`, amount: r.amount,
     onDelete: () => removeItem("recurringIncome", r.id, "Delete this recurring income? Existing entries stay.")
   })), "No recurring income yet.");
+  renderBadges();
 }
 
 // ----- Writes -----
