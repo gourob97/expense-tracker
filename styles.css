@@ -814,6 +814,10 @@ dialog.cat-dialog { width: min(400px, calc(100% - 32px)) }
 .cat-pick { border: 0; margin: 0; padding: 0; min-width: 0 }
 .cat-pick legend { padding: 0; margin-bottom: 8px; font-size: 13px; font-weight: 600; color: var(--muted) }
 .icon-grid { display: grid; grid-template-columns: repeat(8, minmax(0, 1fr)); gap: 6px }
+.icon-search { width: 100%; margin-bottom: 8px }
+/* About four rows show at once; the rest scroll inside the box */
+.icon-scroll { height: 196px; overflow-y: auto; overscroll-behavior: contain; margin: 0 -4px; padding: 2px 4px }
+.icon-note { margin: 8px 0; text-align: center }
 .tone-row { display: grid; grid-template-columns: repeat(8, minmax(0, 1fr)); gap: 6px }
 .icon-opt, .tone-opt { position: relative; display: flex; justify-content: center }
 .icon-opt input, .tone-opt input { position: absolute; inset: 0; width: 100%; height: 100%; margin: 0; opacity: 0; cursor: pointer }

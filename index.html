@@ -441,7 +441,10 @@ try { if (localStorage.getItem("signedIn") === "1") { document.body.dataset.auth
         <input type="text" class="input" id="catName" maxlength="30" autocomplete="off" aria-labelledby="catTitle" aria-describedby="catNameErr" placeholder="Category name" data-i18n-ph="catNamePh">
       </div>
       <p class="field-error" id="catNameErr" hidden></p>
-      <fieldset class="cat-pick"><legend data-i18n="catIconLabel">Icon</legend><div class="icon-grid" id="catIcons"></div></fieldset>
+      <fieldset class="cat-pick"><legend data-i18n="catIconLabel">Icon</legend>
+        <input type="search" class="input icon-search" id="catIconSearch" autocomplete="off" enterkeyhint="search" placeholder="Search icons (in English)" data-i18n-ph="iconSearchPh" data-i18n-aria="iconSearchPh" aria-label="Search icons (in English)">
+        <div class="icon-scroll"><div class="icon-grid" id="catIcons"></div><p class="hint icon-note" id="catIconNote" hidden></p></div>
+      </fieldset>
       <fieldset class="cat-pick"><legend data-i18n="catColourLabel">Colour</legend><div class="tone-row" id="catTones"></div></fieldset>
     </div>
     <div id="catDelBox" class="cat-del" hidden>

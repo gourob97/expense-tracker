@@ -6,6 +6,7 @@ import {
   addDoc as fsAddDoc, deleteDoc as fsDeleteDoc, setDoc as fsSetDoc, updateDoc as fsUpdateDoc, deleteField
 } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
 import { STRINGS, CAT_BN } from "./i18n.js";
+import { BUILTIN, SUGGESTED } from "./icons-builtin.js";
 import { periodRange, periodOf, shiftPeriod, dateInPeriod, addDays, daysBetween, inPeriod, isPeriodKey, normalizeStartDay, DEFAULT_START_DAY } from "./period.js";
 import { formatAmountInput } from "./amount.js";
 import { loanStates, totals, flowBetween, maxPayment, findPerson, cleanName, isValidDue } from "./loans.js";
@@ -111,6 +112,37 @@ const ICONS = {
   gave: '<path d="M7 17L17 7"/><path d="M9 7h8v8"/>',
   got: '<path d="M17 7L7 17"/><path d="M15 17H7V9"/>'
 };
+// Built-in category icons are Lucide's (see icons-builtin.js); the names stay, since saved categories store them
+for (const [k, v] of Object.entries(BUILTIN)) ICONS[k] = v.svg;
+const SVG_NS = "http://www.w3.org/2000/svg";
+const svgShell = size => {
+  const el = document.createElementNS(SVG_NS, "svg");
+  for (const [k, v] of Object.entries({ width: size, height: size, viewBox: "0 0 24 24", fill: "none", stroke: "currentColor", "stroke-width": 1.8, "stroke-linecap": "round", "stroke-linejoin": "round", "aria-hidden": "true" })) el.setAttribute(k, v);
+  return el;
+};
+// A Lucide icon picked in the category editor is saved with its shapes, so it draws without the big icon file.
+// That text comes back from the database, so it is rebuilt from known shapes and attributes, never set as HTML.
+const SHAPES = new Set(["path", "circle", "rect", "line", "polyline", "polygon", "ellipse"]);
+const SHAPE_ATTRS = new Set(["d", "cx", "cy", "r", "rx", "ry", "x", "y", "width", "height", "x1", "y1", "x2", "y2", "points"]);
+const shapeCache = new Map();
+function shapesOf(markup) {
+  if (shapeCache.has(markup)) return shapeCache.get(markup);
+  const tpl = document.createElement("template"); // inert: nothing in it runs or loads
+  tpl.innerHTML = `<svg>${markup}</svg>`;
+  const shapes = [...(tpl.content.firstElementChild?.children || [])].filter(el => SHAPES.has(el.localName))
+    .map(el => [el.localName, [...el.attributes].filter(a => SHAPE_ATTRS.has(a.name)).map(a => [a.name, a.value])]);
+  shapeCache.set(markup, shapes);
+  return shapes;
+}
+function svgMarkup(markup, size = 20) {
+  const el = svgShell(size);
+  for (const [tag, attrs] of shapesOf(markup)) {
+    const n = document.createElementNS(SVG_NS, tag);
+    attrs.forEach(([k, v]) => n.setAttribute(k, v));
+    el.append(n);
+  }
+  return el;
+}
 function svg(name, size = 20) {
   const tpl = document.createElement("template");
   tpl.innerHTML = `<svg width="${size}" height="${size}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${ICONS[name] || ICONS.tag}</svg>`;
@@ -136,12 +168,16 @@ function h(tag, props = {}, ...children) {
 const CAT_STYLE = { Food: [0, "food"], Transport: [1, "transport"], Bills: [2, "bills"], Rent: [3, "rent"], Shopping: [4, "shopping"], Health: [5, "health"], Entertainment: [6, "fun"], Other: [7, "other"] };
 const hashStr = s => [...String(s)].reduce((acc, ch) => (acc * 31 + ch.codePointAt(0)) >>> 0, 7);
 // Icons a category can pick, and its chosen look (settings/categories.styles[name] = { icon, tone }) over the default
+// A built-in name ("food"), or "lucide:<name>" with the icon's shapes in `svg`
 const CAT_ICONS = ["food", "transport", "bills", "rent", "shopping", "health", "fun", "gift", "book", "phone", "plane", "coffee", "paw", "dumbbell", "tag", "other"];
+const LUCIDE_TO_BUILTIN = Object.fromEntries(Object.entries(BUILTIN).map(([k, v]) => [v.lucide, k]));
 let catStyles = {};
-const validStyle = v => !!v && CAT_ICONS.includes(v.icon) && Number.isInteger(v.tone) && v.tone >= 0 && v.tone < 8;
-const catStyle = c => validStyle(catStyles[c]) ? { tone: catStyles[c].tone, icon: catStyles[c].icon }
+const isLucide = v => typeof v.icon === "string" && /^lucide:[a-z0-9-]{1,64}$/.test(v.icon) && typeof v.svg === "string" && v.svg.length <= 4000;
+const validStyle = v => !!v && (CAT_ICONS.includes(v.icon) || isLucide(v)) && Number.isInteger(v.tone) && v.tone >= 0 && v.tone < 8;
+const catStyle = c => validStyle(catStyles[c]) ? { tone: catStyles[c].tone, icon: catStyles[c].icon, svg: catStyles[c].svg }
   : CAT_STYLE[c] ? { tone: CAT_STYLE[c][0], icon: CAT_STYLE[c][1] } : { tone: hashStr(c) % 8, icon: "tag" };
-const catIcon = (c, cls = "") => { const s = catStyle(c); return h("span", { class: `cat-icon tone-${s.tone} ${cls}` }, svg(s.icon, cls ? 18 : 20)); };
+const iconSvg = (s, size) => s.icon.startsWith("lucide:") && s.svg ? svgMarkup(s.svg, size) : svg(s.icon, size);
+const catIcon = (c, cls = "") => { const s = catStyle(c); return h("span", { class: `cat-icon tone-${s.tone} ${cls}` }, iconSvg(s, cls ? 18 : 20)); };
 
 // ----- Language & formatting -----
 const LOCALES = { en: "en-IN", bn: "bn-BD" };
@@ -812,7 +848,7 @@ function buildCatGrid(select) {
     const s = catStyle(c);
     return h("label", { class: "chip-opt" },
       h("input", { type: "radio", name: "cat", value: c, checked: (prev ? prev === c : i === 0) || null }),
-      h("span", { class: "chip-face" }, h("span", { class: `cat-icon xs tone-${s.tone}` }, svg(s.icon, 16)), h("span", { text: catLabel(c) })));
+      h("span", { class: "chip-face" }, h("span", { class: `cat-icon xs tone-${s.tone}` }, iconSvg(s, 16)), h("span", { text: catLabel(c) })));
   }), h("button", { type: "button", class: "chip-opt new-chip", onclick: () => openCatEditor(null, { onSaved: name => buildCatGrid(name) }) },
     h("span", { class: "chip-face" }, svg("plus", 16), h("span", { text: t("newCat") }))));
   if (!grid.querySelector("input:checked")) grid.querySelector("input")?.click();
@@ -2168,9 +2204,9 @@ function openCatEditor(old, { onSaved = null } = {}) {
   const tone = st ? st.tone : uses.indexOf(Math.min(...uses.slice(0, 7))); // grey (7) is left for "Other"
   $("catTitle").textContent = t(old ? "editCatTitle" : "newCatTitle");
   $("catName").value = old ? catLabel(old) : "";
-  $("catIcons").replaceChildren(...CAT_ICONS.map(ic => h("label", { class: "icon-opt" },
-    h("input", { type: "radio", name: "catIcon", value: ic, checked: ic === (st ? st.icon : "tag") || null, "aria-label": ic }),
-    h("span", { class: "icon-face" }, svg(ic, 20)))));
+  catEdit.icon = st ? { icon: st.icon, svg: st.svg } : { icon: "tag" };
+  $("catIconSearch").value = "";
+  renderIconChoices();
   $("catTones").replaceChildren(...[0, 1, 2, 3, 4, 5, 6, 7].map(n => h("label", { class: `tone-opt tone-${n}` },
     h("input", { type: "radio", name: "catTone", value: n, checked: n === tone || null, "aria-label": t("colourN", { n: fmtInt(n + 1) }) }),
     h("span", { class: "tone-face" }))));
@@ -2180,11 +2216,69 @@ function openCatEditor(old, { onSaved = null } = {}) {
   openDialog($("catDialog"));
   if (!old) $("catName").focus();
 }
+// ----- Icon picker: built-ins and suggestions, or a search over every Lucide icon (loaded on first search) -----
+const iconOption = (value, label, el) => h("label", { class: "icon-opt", title: label },
+  h("input", { type: "radio", name: "catIcon", value, checked: value === catEdit.icon.icon || null, "aria-label": label }),
+  h("span", { class: "icon-face" }, el));
+const iconLabel = name => name.replace(/-/g, " ");
+// value → { icon, svg } for whatever the grid is showing, so a pick can be saved with its shapes
+let iconChoices = new Map();
+function setIconChoices(list, note = "") {
+  iconChoices = new Map(list.map(c => [c.icon, c]));
+  $("catIcons").replaceChildren(...list.map(c => iconOption(c.icon, c.label, c.svg ? svgMarkup(c.svg, 20) : svg(c.icon, 20))));
+  $("catIconNote").textContent = note;
+  $("catIconNote").hidden = !note;
+}
+function renderIconChoices() {
+  const q = $("catIconSearch").value.trim().toLowerCase();
+  if (!q) {
+    const list = [...CAT_ICONS.map(k => ({ icon: k, label: iconLabel(BUILTIN[k].lucide) })),
+      ...Object.entries(SUGGESTED).map(([n, m]) => ({ icon: `lucide:${n}`, label: iconLabel(n), svg: m }))];
+    // A Lucide icon picked earlier that isn't among these goes first, so the current choice is always visible
+    const cur = catEdit.icon;
+    if (!list.some(c => c.icon === cur.icon) && cur.svg) list.unshift({ icon: cur.icon, label: iconLabel(cur.icon.slice(7)), svg: cur.svg });
+    setIconChoices(list);
+    return;
+  }
+  if (!lucide) {
+    setIconChoices([], t("iconsLoading"));
+    loadLucide().then(() => { if ($("catDialog").open) renderIconChoices(); }, () => setIconChoices([], t("iconsOffline")));
+    return;
+  }
+  const hits = searchIcons(q);
+  setIconChoices(hits.slice(0, 120).map(n => LUCIDE_TO_BUILTIN[n]
+    ? { icon: LUCIDE_TO_BUILTIN[n], label: iconLabel(n) }
+    : { icon: `lucide:${n}`, label: iconLabel(n), svg: lucide.ICONS[n] }), hits.length ? "" : t("iconsNone"));
+}
+let lucide = null, lucideLoading = null;
+const loadLucide = () => lucideLoading ||= import("./lucide-icons.js").then(m => { lucide = m; }, e => { lucideLoading = null; throw e; });
+// Words match whole words or word beginnings ("car" finds car-front, not carrot's middle or bluetooth).
+// Best first: the exact name, then words in the name, then search words (tags); icons matching only some
+// of the words come after those matching all of them.
+let iconIndex = null;
+function searchIcons(q) {
+  iconIndex ||= Object.keys(lucide.ICONS).map(n => [n, n.split("-"), (lucide.TAGS[n] || "").toLowerCase().split(/[\s-]+/)]);
+  const words = q.split(/\s+/).filter(Boolean), joined = words.join("-");
+  const scored = [];
+  for (const [n, nameW, tagW] of iconIndex) {
+    let score = n === joined ? 0 : 0.5, hit = 0;
+    for (const w of words) {
+      const s = nameW.includes(w) ? 1 : nameW.some(x => x.startsWith(w)) ? 2 : tagW.includes(w) ? 3 : tagW.some(x => x.startsWith(w)) ? 4 : 0;
+      if (s) { hit++; score += s; }
+    }
+    if (hit) scored.push([words.length - hit, score, n.length, n]);
+  }
+  return scored.sort((a, b) => a[0] - b[0] || a[1] - b[1] || a[2] - b[2] || (a[3] < b[3] ? -1 : 1)).map(x => x[3]);
+}
+let iconSearchTimer;
+$("catIconSearch").addEventListener("input", () => { clearTimeout(iconSearchTimer); iconSearchTimer = setTimeout(renderIconChoices, 120); });
+// Enter in the search box shouldn't save the category
+$("catIconSearch").addEventListener("keydown", e => { if (e.key === "Enter") e.preventDefault(); });
 const catPick = name => $("catDialog").querySelector(`input[name="${name}"]:checked`)?.value;
 // The big icon at the top, and the picked icon's highlight, follow the chosen icon and colour
 function syncCatPreview() {
-  const tone = Number(catPick("catTone") ?? 7), icon = catPick("catIcon") || "tag";
-  $("catPreview").replaceChildren(h("span", { class: `cat-icon tone-${tone}` }, svg(icon, 22)));
+  const tone = Number(catPick("catTone") ?? 7);
+  $("catPreview").replaceChildren(h("span", { class: `cat-icon tone-${tone}` }, iconSvg(catEdit.icon, 22)));
   $("catIcons").className = `icon-grid tone-${tone}`;
 }
 function setCatMode(mode) {
@@ -2204,7 +2298,10 @@ function setCatMode(mode) {
     $("catMoveTo").value = others.includes("Other") ? "Other" : others[0] || "";
   }
 }
-$("catDialog").addEventListener("change", e => { if (e.target.name === "catIcon" || e.target.name === "catTone") syncCatPreview(); });
+$("catDialog").addEventListener("change", e => {
+  if (e.target.name === "catIcon") { const c = iconChoices.get(e.target.value); if (c) catEdit.icon = { icon: c.icon, svg: c.svg }; }
+  if (e.target.name === "catIcon" || e.target.name === "catTone") syncCatPreview();
+});
 $("catName").addEventListener("input", () => fieldError("catNameErr", ""));
 $("catCancel").onclick = () => { if (catEdit?.mode === "delete") setCatMode("edit"); else closeDialog($("catDialog")); };
 $("catDelete").onclick = () => {
@@ -2219,7 +2316,8 @@ $("catForm").onsubmit = e => {
   const name = $("catName").value.trim().replace(/\s+/g, " ");
   if (!name) { fieldError("catNameErr", t("catNeedName")); $("catName").focus(); return; }
   if (catClash(name, catEdit.old)) { fieldError("catNameErr", t("catExists", { name })); $("catName").focus(); return; }
-  const style = { icon: catPick("catIcon") || "tag", tone: Number(catPick("catTone") ?? 7) };
+  const ic = catEdit.icon, tone = Number(catPick("catTone") ?? 7);
+  const style = ic.icon.startsWith("lucide:") && ic.svg ? { icon: ic.icon, svg: ic.svg, tone } : { icon: CAT_ICONS.includes(ic.icon) ? ic.icon : "tag", tone };
   const { old, onSaved } = catEdit;
   closeDialog($("catDialog"));
   guard(() => old ? saveCategory(old, name, style) : createCategory(name, style, onSaved))();
