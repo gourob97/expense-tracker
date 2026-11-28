@@ -556,16 +556,19 @@ dialog.account-panel {
   border-radius: 28px 28px 0 0; background: var(--surface); color: var(--text); box-shadow: var(--shadow)
 }
 dialog.account-panel::backdrop { background: rgba(0, 0, 0, .55) }
-.acct-inner { display: flex; flex-direction: column; padding: 8px 12px calc(12px + env(safe-area-inset-bottom)) }
-.acct-inner .grabber { margin-bottom: 8px }
-.acct-head { display: flex; align-items: center; gap: 14px; padding: 8px 10px 16px }
+.acct-inner { display: flex; flex-direction: column; gap: 16px; padding: 8px 20px calc(16px + env(safe-area-inset-bottom)) }
+.acct-inner .grabber { margin-bottom: -4px }
+.acct-head { display: flex; align-items: center; gap: 14px; padding: 4px 2px }
 .acct-id { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px }
 .acct-name { font-size: 16px; font-weight: 600; letter-spacing: -.01em; overflow: hidden; text-overflow: ellipsis; white-space: nowrap }
 .acct-email { margin: 0; font-size: 13px; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap }
 .acct-sync { margin: 4px 0 0; display: flex; align-items: center; gap: 6px; font-size: 12px; color: var(--text-2) }
-.acct-section { display: flex; flex-direction: column; padding: 6px 0; border-top: 1px solid var(--line) }
-.acct-head + .acct-section { padding-top: 6px }
-.acct-row { display: flex; align-items: center; gap: 12px; min-height: 52px; padding: 4px 10px; border-radius: 12px }
+/* Groups: a small heading over a rounded card, like the Categories sheet */
+.acct-group { display: flex; flex-direction: column; gap: 6px }
+.acct-group-title { margin: 0; padding: 0 4px; font-size: 12px; font-weight: 600; letter-spacing: .04em; text-transform: uppercase; color: var(--muted) }
+.acct-card { display: flex; flex-direction: column; border: 1px solid var(--line); border-radius: var(--r-lg); overflow: hidden }
+.acct-card > .acct-row + .acct-row { border-top: 1px solid var(--line) }
+.acct-row { display: flex; align-items: center; gap: 12px; min-height: 52px; padding: 6px 12px 6px 14px }
 .acct-label { flex: 1; min-width: 0; display: flex; align-items: center; gap: 12px; font-size: 15px; white-space: nowrap }
 .acct-label svg { color: var(--muted); flex: 0 0 auto }
 .acct-btn { width: 100%; border: 0; background: transparent; text-align: left; color: var(--text) }
@@ -574,7 +577,18 @@ dialog.account-panel::backdrop { background: rgba(0, 0, 0, .55) }
 .acct-value { font-size: 14px; color: var(--muted) }
 .acct-chev { color: var(--muted); margin-right: -4px }
 .acct-btn.danger, .acct-btn.danger svg { color: var(--danger) }
-.acct-row .btn-row { flex-wrap: nowrap; gap: 6px }
+/* Every control on the right is the same width, so they line up in one column */
+.acct-ctl { flex: 0 0 auto; width: 176px }
+.acct-row .btn-row.acct-ctl { display: grid; grid-template-columns: 1fr 1fr; gap: 6px }
+.acct-row .btn-row.acct-ctl .btn { width: 100% }
+/* Narrow phones and the desktop popover: a little less room, so a slimmer control column */
+@media (max-width: 380px) {
+  .acct-ctl { width: 160px }
+  .acct-row { gap: 10px; padding: 6px 10px 6px 12px }
+  .acct-label { gap: 10px }
+}
+.acct-foot { display: flex; flex-direction: column; align-items: center; gap: 2px; padding: 0 0 4px; font-size: 12px; color: var(--muted); text-align: center }
+.acct-foot-name { font-weight: 600 }
 .segmented.compact { flex: 0 0 auto; gap: 2px; padding: 3px; border-radius: 10px }
 .segmented.two { grid-template-columns: repeat(2, minmax(0, 1fr)) }
 .segmented.four { grid-template-columns: repeat(4, minmax(0, 1fr)) }
@@ -629,11 +643,14 @@ body:not([data-auth="in"]) .toast[popover] { bottom: 24px }
   .add-btn { display: inline-flex }
   .account-btn.top .avatar { width: 36px; height: 36px }
   /* Popover: left/top are set from the anchor in app.js */
-  dialog.account-panel { position: fixed; inset: auto; margin: 0; width: 340px; max-width: calc(100vw - 16px); max-height: calc(100dvh - 16px); border-radius: 18px; border: 1px solid var(--line-2) }
+  dialog.account-panel { position: fixed; inset: auto; margin: 0; width: 360px; max-width: calc(100vw - 16px); max-height: calc(100dvh - 16px); border-radius: 18px; border: 1px solid var(--line-2) }
   dialog.account-panel::backdrop { background: transparent }
   .account-panel .grabber { display: none }
-  .acct-inner { padding: 8px }
-  .acct-head { padding: 10px 10px 14px }
+  .acct-inner { padding: 14px; gap: 14px }
+  .acct-ctl { width: 164px }
+  .acct-row { gap: 10px; padding: 6px 10px 6px 12px }
+  .acct-label { gap: 10px }
+  .acct-head { padding: 0 2px }
   .acct-row { min-height: 48px }
 
   .nav { position: sticky; top: 0; bottom: auto; padding: 8px 32px 12px; background: var(--bg); border-top: 0; -webkit-backdrop-filter: none; backdrop-filter: none }

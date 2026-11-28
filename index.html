@@ -490,45 +490,62 @@ try { if (localStorage.getItem("signedIn") === "1") { document.body.dataset.auth
         <p class="acct-sync"><span class="sync-dot" aria-hidden="true"></span><span class="sync-text"></span></p>
       </div>
     </div>
-    <div class="acct-section">
-      <div class="acct-row">
-        <span class="acct-label" id="themeLabel"><span data-icon="sun"></span><span data-i18n="theme">Theme</span></span>
-        <div class="segmented compact" role="radiogroup" aria-labelledby="themeLabel">
-          <label><input type="radio" name="themePref" value="system"><span data-i18n="themeSystem">System</span></label>
-          <label><input type="radio" name="themePref" value="light"><span data-i18n="themeLight">Light</span></label>
-          <label><input type="radio" name="themePref" value="dark"><span data-i18n="themeDark">Dark</span></label>
+    <section class="acct-group" aria-labelledby="grpPrefs">
+      <h3 class="acct-group-title" id="grpPrefs" data-i18n="grpPrefs">Preferences</h3>
+      <div class="acct-card">
+        <div class="acct-row">
+          <span class="acct-label" id="themeLabel"><span data-icon="sun"></span><span data-i18n="theme">Theme</span></span>
+          <div class="segmented compact acct-ctl" role="radiogroup" aria-labelledby="themeLabel">
+            <label><input type="radio" name="themePref" value="system"><span data-i18n="themeSystem">System</span></label>
+            <label><input type="radio" name="themePref" value="light"><span data-i18n="themeLight">Light</span></label>
+            <label><input type="radio" name="themePref" value="dark"><span data-i18n="themeDark">Dark</span></label>
+          </div>
+        </div>
+        <div class="acct-row">
+          <span class="acct-label" id="langLabel"><span data-icon="globe"></span><span data-i18n="language">Language</span></span>
+          <div class="segmented compact two acct-ctl" role="radiogroup" aria-labelledby="langLabel">
+            <label><input type="radio" name="langPref" value="en"><span lang="en">English</span></label>
+            <label><input type="radio" name="langPref" value="bn"><span lang="bn">বাংলা</span></label>
+          </div>
         </div>
       </div>
-      <div class="acct-row">
-        <span class="acct-label" id="langLabel"><span data-icon="globe"></span><span data-i18n="language">Language</span></span>
-        <div class="segmented compact two" role="radiogroup" aria-labelledby="langLabel">
-          <label><input type="radio" name="langPref" value="en"><span lang="en">English</span></label>
-          <label><input type="radio" name="langPref" value="bn"><span lang="bn">বাংলা</span></label>
+    </section>
+    <section class="acct-group when-in" aria-labelledby="grpBudget">
+      <h3 class="acct-group-title" id="grpBudget" data-i18n="grpBudget">Budgeting</h3>
+      <div class="acct-card">
+        <button type="button" class="acct-row acct-btn" id="acctCats">
+          <span class="acct-label"><span data-icon="tag"></span><span data-i18n="categories">Categories</span></span>
+          <span class="acct-value" id="acctCatsVal"></span>
+          <span data-icon="chevron" class="acct-chev"></span>
+        </button>
+        <button type="button" class="acct-row acct-btn" id="acctCycle">
+          <span class="acct-label"><span data-icon="calendar"></span><span data-i18n="cycleRow">Month starts on</span></span>
+          <span class="acct-value" id="acctCycleVal"></span>
+          <span data-icon="chevron" class="acct-chev"></span>
+        </button>
+      </div>
+    </section>
+    <section class="acct-group when-in" aria-labelledby="grpData">
+      <h3 class="acct-group-title" id="grpData" data-i18n="grpData">Your data</h3>
+      <div class="acct-card">
+        <div class="acct-row">
+          <span class="acct-label" id="exportLabel"><span data-icon="download"></span><span data-i18n="exportData">Export data</span></span>
+          <div class="btn-row acct-ctl" role="group" aria-labelledby="exportLabel">
+            <button type="button" class="btn small secondary" id="exportCsv" data-i18n-aria="exportCsv" aria-label="Export entries as CSV">CSV</button>
+            <button type="button" class="btn small secondary" id="exportJson" data-i18n-aria="exportJson" aria-label="Download full backup as JSON">JSON</button>
+          </div>
         </div>
       </div>
-      <button type="button" class="acct-row acct-btn when-in" id="acctCats">
-        <span class="acct-label"><span data-icon="tag"></span><span data-i18n="categories">Categories</span></span>
-        <span class="acct-value" id="acctCatsVal"></span>
-        <span data-icon="chevron" class="acct-chev"></span>
-      </button>
-      <button type="button" class="acct-row acct-btn when-in" id="acctCycle">
-        <span class="acct-label"><span data-icon="calendar"></span><span data-i18n="cycleRow">Month starts on</span></span>
-        <span class="acct-value" id="acctCycleVal"></span>
-        <span data-icon="chevron" class="acct-chev"></span>
-      </button>
-      <div class="acct-row when-in">
-        <span class="acct-label" id="exportLabel"><span data-icon="download"></span><span data-i18n="exportData">Export data</span></span>
-        <div class="btn-row" role="group" aria-labelledby="exportLabel">
-          <button type="button" class="btn small secondary" id="exportCsv" data-i18n-aria="exportCsv" aria-label="Export entries as CSV">CSV</button>
-          <button type="button" class="btn small secondary" id="exportJson" data-i18n-aria="exportJson" aria-label="Download full backup as JSON">JSON</button>
-        </div>
-      </div>
-    </div>
-    <div class="acct-section when-in">
+    </section>
+    <div class="acct-card acct-signout when-in">
       <button type="button" class="acct-row acct-btn danger" id="acctSignOut">
         <span class="acct-label"><span data-icon="logout"></span><span data-i18n="signOut">Sign out</span></span>
       </button>
     </div>
+    <footer class="acct-foot">
+      <span class="acct-foot-name"><span data-i18n="appTitle">Expense Ledger</span> · v1.0</span>
+      <span data-i18n="acctFootNote">Your data syncs to your Google account.</span>
+    </footer>
   </div>
 </dialog>
 
