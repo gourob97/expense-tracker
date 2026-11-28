@@ -198,6 +198,47 @@ main { overflow-x: clip }
   background: var(--accent); color: var(--accent-ink); display: inline-flex; align-items: center; justify-content: center; box-shadow: var(--shadow);
 }
 
+/* Phones: a floating dock. The active tab gets a soft pill behind its icon; + sits inside the dock. */
+@media (max-width: 599px) {
+  .nav {
+    left: max(12px, env(safe-area-inset-left)); right: max(12px, env(safe-area-inset-right));
+    bottom: max(12px, env(safe-area-inset-bottom));
+    padding: 6px; border: 1px solid var(--line-2); border-radius: 26px;
+    background: color-mix(in srgb, var(--surface) 82%, transparent);
+    -webkit-backdrop-filter: blur(20px) saturate(1.6); backdrop-filter: blur(20px) saturate(1.6);
+    box-shadow: 0 10px 30px rgba(0, 0, 0, .5), 0 1px 0 rgba(255, 255, 255, .04) inset;
+  }
+  :root[data-theme="light"] .nav {
+    background: color-mix(in srgb, var(--surface) 86%, transparent);
+    box-shadow: 0 10px 30px rgba(16, 24, 40, .12), 0 2px 6px rgba(16, 24, 40, .06);
+  }
+  /* Fade the content out under the dock so it doesn't look like it's cut off */
+  body[data-auth="in"]::after {
+    content: ""; position: fixed; left: 0; right: 0; bottom: 0; z-index: 29; pointer-events: none;
+    height: calc(var(--nav-h) + 24px + env(safe-area-inset-bottom));
+    background: linear-gradient(to top, var(--bg) 35%, color-mix(in srgb, var(--bg) 0%, transparent));
+  }
+  .nav-item { gap: 2px; min-height: 56px; border-radius: 20px; font-size: 10.5px; letter-spacing: .01em }
+  :root[lang="bn"] .nav-item { font-size: 11.5px }
+  .nav-icon { align-items: center; justify-content: center; width: 52px; height: 30px; border-radius: 15px;
+    transition: background-color var(--dur) var(--ease-out), transform var(--dur) var(--ease-out) }
+  .nav-icon svg { width: 21px; height: 21px }
+  .nav-item[aria-current="page"] .nav-icon, body[data-tab="income"] .nav-item[data-tab="expenses"] .nav-icon {
+    background: var(--accent-soft)
+  }
+  .nav-item[aria-current="page"] .nav-icon svg, body[data-tab="income"] .nav-item[data-tab="expenses"] .nav-icon svg { stroke-width: 2.1 }
+  .nav-item:active .nav-icon { transform: scale(.9) }
+  .alert { top: 1px; right: 9px; border-color: var(--surface) }
+  #navPlanned .alert { top: -4px; right: 7px }
+  @media (max-width: 359px) { .nav-icon { width: 44px } .nav-item { font-size: 10px } }
+
+  .fab {
+    width: 52px; height: 52px; margin-top: 0; border-radius: 18px;
+    background: linear-gradient(160deg, color-mix(in srgb, var(--accent) 80%, #fff), var(--accent) 55%);
+    box-shadow: 0 6px 16px color-mix(in srgb, var(--accent) 40%, transparent), 0 1px 0 rgba(255, 255, 255, .35) inset;
+  }
+}
+
 /* ===== Loading / sign in ===== */
 .loading { display: flex; align-items: center; justify-content: center; gap: 12px; min-height: 50dvh; color: var(--muted); animation: boot-in .2s .3s both }
 /* Shown only if loading takes a moment, so a fast start doesn't flash it */
