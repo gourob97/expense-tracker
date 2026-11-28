@@ -469,6 +469,29 @@ try { if (localStorage.getItem("signedIn") === "1") { document.body.dataset.auth
   </div>
 </dialog>
 
+<!-- Mark spent: the planned item becomes an expense on the day it was paid (today unless changed) -->
+<dialog id="spentDialog" class="confirm" aria-labelledby="spentTitle" aria-describedby="spentItem">
+  <h2 id="spentTitle" class="dialog-title" data-i18n="markSpentTitle">Mark as spent</h2>
+  <p class="spent-item" id="spentItem"></p>
+  <fieldset class="chip-field">
+    <legend data-i18n="spentOn">Spent on</legend>
+    <div class="chip-row">
+      <label class="chip-opt"><input type="radio" name="spentChoice" value="today"><span class="chip-face" data-i18n="today">Today</span></label>
+      <label class="chip-opt"><input type="radio" name="spentChoice" value="yesterday"><span class="chip-face" data-i18n="yesterday">Yesterday</span></label>
+      <label class="chip-opt date-pick" id="spentDatePick">
+        <span class="chip-face"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="5" width="18" height="16" rx="2"/><path d="M3 10h18"/><path d="M8 3v4"/><path d="M16 3v4"/></svg><span id="spentDateLabel">Pick date</span></span>
+        <input type="date" id="spentDate" aria-label="Spent on" data-i18n-aria="spentOn">
+      </label>
+    </div>
+    <p class="field-error" id="spentDateErr" hidden></p>
+  </fieldset>
+  <p class="hint" id="spentPlanned"></p>
+  <div class="btn-row end">
+    <button type="button" class="btn secondary" id="spentCancel" data-i18n="cancel">Cancel</button>
+    <button type="button" class="btn primary" id="spentSave" data-i18n="markSpent">Mark spent</button>
+  </div>
+</dialog>
+
 <dialog id="cycleDialog" class="confirm" aria-labelledby="cycleTitle" aria-describedby="cycleHint">
   <h2 id="cycleTitle" class="dialog-title" data-i18n="cycleTitle">Month start day</h2>
   <div class="field-group">

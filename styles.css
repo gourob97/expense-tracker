@@ -783,6 +783,9 @@ dialog.confirm p { margin: 0 0 18px; font-size: 15px }
 
 /* Month start day dialog */
 .dialog-title { font-size: 17px; font-weight: 600; margin: 0 0 14px }
+.spent-item { margin: -6px 0 16px; font-size: 15px; color: var(--text-2); overflow-wrap: anywhere }
+#spentDialog .chip-field { margin-bottom: 10px }
+#spentDialog .hint { margin: 0 0 18px }
 
 /* ===== Categories ===== */
 /* Sheet: "Category" with an Edit link beside it, and a "+ New" chip after the categories */

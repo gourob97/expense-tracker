@@ -310,7 +310,7 @@ function closeDialog(d, { instant = false } = {}) {
 }
 // Esc (and Android back) animate out too. If the browser won't allow the close to be deferred, it closes at once.
 // The confirm dialog handles cancel itself, since it has to resolve its promise.
-["entryDialog", "cycleDialog", "accountDialog", "nameDialog", "catDialog", "catsDialog"].forEach(id => $(id).addEventListener("cancel", e => {
+["entryDialog", "cycleDialog", "accountDialog", "nameDialog", "catDialog", "catsDialog", "spentDialog"].forEach(id => $(id).addEventListener("cancel", e => {
   if (!e.cancelable) return;
   e.preventDefault();
   closeDialog(e.currentTarget);
@@ -1232,7 +1232,7 @@ function init() {
     stopListeners();
     closeMenu(false);
     // The account changed under them, so they go at once rather than animating over the new state
-    ["entryDialog", "cycleDialog", "accountDialog", "nameDialog", "catDialog", "catsDialog"].forEach(id => closeDialog($(id), { instant: true }));
+    ["entryDialog", "cycleDialog", "accountDialog", "nameDialog", "catDialog", "catsDialog", "spentDialog"].forEach(id => closeDialog($(id), { instant: true }));
     if (u) {
       document.body.dataset.auth = "in";
       startBooting();
@@ -2150,16 +2150,49 @@ function deleteWithUndo(col, item, msg) {
 // Turns a planned item into a real expense and removes it from the plan. A second tap on the same item (before the
 // re-render replaces its button) is ignored, so it can't become two expenses.
 const markedSpent = new Set();
+// Asks which day it was paid (today unless changed; not in the future), then moves it to expenses on that day
+let spentFor = null;
 function markSpent(p) {
   if (markedSpent.has(p.id)) return;
+  spentFor = p;
+  $("spentItem").textContent = `${p.note || catLabel(p.category)} · ${fmt(p.amount)}`;
+  $("spentPlanned").textContent = p.date ? t("plannedFor", { date: fmtDate(p.date) }) : "";
+  $("spentDate").max = todayISO();
+  setSpentDate(todayISO());
+  openDialog($("spentDialog"));
+  $("spentSave").focus({ preventScroll: true });
+}
+function setSpentDate(iso) { $("spentDate").value = iso; syncSpentChips(); }
+function syncSpentChips() {
+  const v = $("spentDate").value, today = todayISO(), yest = addDays(today, -1);
+  document.querySelectorAll('input[name="spentChoice"]').forEach(r => { r.checked = (r.value === "today" && v === today) || (r.value === "yesterday" && v === yest); });
+  const other = !!v && v !== today && v !== yest;
+  $("spentDatePick").classList.toggle("selected", other);
+  $("spentDateLabel").textContent = other ? fmtDate(v) : t("pickDate");
+  fieldError("spentDateErr", "");
+}
+document.querySelectorAll('input[name="spentChoice"]').forEach(r => { r.onchange = () => setSpentDate(r.value === "today" ? todayISO() : addDays(todayISO(), -1)); });
+$("spentDate").addEventListener("change", syncSpentChips);
+$("spentDate").addEventListener("click", () => { try { $("spentDate").showPicker(); } catch (e) { /* opens natively, or unsupported */ } });
+$("spentCancel").onclick = () => closeDialog($("spentDialog"));
+$("spentDialog").onclick = e => { if (e.target === $("spentDialog")) closeDialog($("spentDialog")); };
+$("spentSave").onclick = guard(() => {
+  const p = spentFor, date = $("spentDate").value;
+  if (!p || "leaving" in $("spentDialog").dataset) return;
+  if (!date) { fieldError("spentDateErr", t("dateNeeded")); return; }
+  if (date > todayISO()) { fieldError("spentDateErr", t("spentFuture")); return; }
+  if (markedSpent.has(p.id)) return;
   markedSpent.add(p.id);
+  closeDialog($("spentDialog"));
   writeInBackground(addDoc(userCol("expenses"), {
-    amount: p.amount, category: p.category, date: p.date,
+    amount: p.amount, category: p.category, date,
     note: p.note || "", recurringId: null, createdAt: Date.now()
   }));
   writeInBackground(deleteDoc(userDoc("planned", p.id)));
-  toast(t("movedToExpenses"));
-}
+  // Paid in another month than the one on screen: say where it went, since it won't appear here
+  const { start, end } = currentRange();
+  toast(date < start || date > end ? t("movedToExpensesOn", { date: fmtDate(date) }) : t("movedToExpenses"));
+});
 
 function saveBudget(c, input) {
   const raw = input.value.trim();
