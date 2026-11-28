@@ -81,8 +81,8 @@ try { if (localStorage.getItem("signedIn") === "1") { document.body.dataset.auth
       <button type="button" class="fab" id="fab" data-i18n-aria="addEntry" aria-label="Add entry">
         <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 5v14"/><path d="M5 12h14"/></svg>
       </button>
-      <a class="nav-item" href="#/planned" data-tab="planned">
-        <span class="nav-icon"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="5" width="18" height="16" rx="2"/><path d="M3 10h18"/><path d="M8 3v4"/><path d="M16 3v4"/></svg></span>
+      <a class="nav-item" href="#/planned" data-tab="planned" id="navPlanned">
+        <span class="nav-icon"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="5" width="18" height="16" rx="2"/><path d="M3 10h18"/><path d="M8 3v4"/><path d="M16 3v4"/></svg><span class="alert due-alert" id="badge-planned-due"></span></span>
         <span class="nav-label" data-i18n="tabPlanned">Planned</span><span class="count" id="badge-planned"></span>
       </a>
       <a class="nav-item" href="#/budgets" data-tab="budgets" id="navBudgets">
@@ -146,6 +146,8 @@ try { if (localStorage.getItem("signedIn") === "1") { document.body.dataset.auth
         </div>
       </div>
       <p class="visually-hidden boot-status" role="status" data-i18n="loading">Loading…</p>
+      <!-- Planned payments dated today or earlier (any month) and not yet marked spent; Expenses tab only -->
+      <div class="rec-banner card due-banner" id="dueBanner" role="status" hidden></div>
       <section class="summary" aria-label="Month summary" data-i18n-aria="summaryLabel">
         <div class="hero">
           <div class="label" id="leftLabel">Left to spend</div>
@@ -273,6 +275,7 @@ try { if (localStorage.getItem("signedIn") === "1") { document.body.dataset.auth
               <span class="muted" id="planCount"></span>
             </div>
             <p class="hint top" data-i18n="plannedHint">Costs you intend to make this month. “Mark spent” turns one into a real expense.</p>
+            <div class="rec-banner card due-banner" id="dueEarlier" hidden></div>
             <div id="plannedList" class="grouped"></div>
           </section>
         </div>

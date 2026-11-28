@@ -97,6 +97,8 @@ const ICONS = {
   trash: '<path d="M4 7h16"/><path d="M9 7V4h6v3"/><path d="M6 7l1 13h10l1-13"/>',
   check: '<path d="M5 12l5 5 9-10"/>',
   x: '<path d="M6 6l12 12"/><path d="M18 6L6 18"/>',
+  bell: '<path d="M10.268 21a2 2 0 0 0 3.464 0"/><path d="M3.262 15.326A1 1 0 0 0 4 17h16a1 1 0 0 0 .74-1.673C19.41 13.956 18 12.499 18 8A6 6 0 0 0 6 8c0 4.499-1.411 5.956-2.738 7.326"/>',
+  clock: '<circle cx="12" cy="12" r="10"/><path d="M12 6v6l4 2"/>',
   alert: '<path d="M12 3l10 18H2z"/><path d="M12 10v4"/><path d="M12 17.5v.01"/>',
   sun: '<circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/>',
   moon: '<path d="M20 14.5A8 8 0 1 1 9.5 4a6.5 6.5 0 0 0 10.5 10.5z"/>',
@@ -1255,6 +1257,7 @@ function init() {
 
 function stopListeners() {
   unsubs.forEach(f => f()); unsubs = [];
+  dueUnsub(); dueUnsub = () => {}; dueItems = [];
   monthUnsubs.forEach(f => f()); monthUnsubs = [];
   monthPending = new Set(MONTH_COLS);
   loansPending = new Set(LOAN_COLS);
@@ -1264,6 +1267,7 @@ const mapDocs = s => s.docs.map(d => ({ id: d.id, ...d.data() }));
 
 function subscribeAll() {
   subscribeMonth();
+  subscribeDue();
   unsubs.push(onSnapshot(userDoc("settings", "categories"), s => {
     categories = s.exists() && Array.isArray(s.data().list) ? s.data().list : [...DEFAULT_CATEGORIES];
     catStyles = s.exists() && s.data().styles && typeof s.data().styles === "object" ? s.data().styles : {};
@@ -1286,6 +1290,59 @@ function subscribeAll() {
     e => { loansPending.delete(name); onErr(e); });
   unsubs.push(listenLoans("people", docs => { people = docs; }), listenLoans("loans", docs => { loans = docs; }),
     listenLoans("loanPayments", docs => { loanPayments = docs; }));
+}
+
+// ----- Due planned payments: dated today or earlier, in any month, and not yet marked spent -----
+// The month listener only sees the month on screen, so a payment planned in an earlier month and never marked
+// spent would be forgotten. This one listens to every planned item up to today; a new day starts a new query.
+let dueItems = [], dueUnsub = () => {}, dueDay = "";
+function subscribeDue() {
+  dueUnsub();
+  dueDay = todayISO();
+  dueUnsub = onSnapshot(query(userCol("planned"), where("date", "<=", dueDay), orderBy("date", "asc")),
+    s => { dueItems = mapDocs(s); renderAll(); }, onErr);
+}
+// Past midnight with the app open (or reopened from the background): move the reminders to the new day
+function checkNewDay() { if (user && dueDay && todayISO() !== dueDay) { subscribeDue(); renderAll(); } }
+document.addEventListener("visibilitychange", () => { if (!document.hidden) checkNewDay(); });
+setInterval(checkNewDay, 60000);
+const dueNow = () => dueItems.filter(p => p.date && p.date <= todayISO() && !markedSpent.has(p.id));
+// "Due today" in amber, "3 days late" in red; nothing for later dates
+function dueLabel(p) {
+  if (!p.date) return null;
+  const late = daysBetween(p.date, todayISO());
+  if (late < 0) return null;
+  return h("span", { class: `due-label ${late ? "late" : "today"}` }, svg(late ? "alert" : "clock", 13),
+    h("span", { text: late ? plural(late, "oneDayLate", "nDaysLate") : t("plannedDueToday") }));
+}
+// Review / Show go to the Planned tab of the month holding the oldest of these
+const goToPlannedFor = items => { location.hash = hashFor("planned", periodOf(items[0].date, startDay)); };
+function renderDue() {
+  const due = dueNow(), today = todayISO();
+  const box = $("dueBanner");
+  box.hidden = !due.length;
+  if (due.length) {
+    const late = due.filter(p => p.date < today).length, now = due.length - late;
+    box.replaceChildren(
+      h("span", { class: "rec-icon" }, svg("bell", 18)),
+      h("div", { class: "rec-text" },
+        h("div", { class: "rec-title", text: plural(due.length, "dueOnePayment", "dueNPayments") }),
+        h("div", { class: "rec-sub", text: [late ? t("dueLateN", { n: fmtInt(late) }) : "", now ? t("dueTodayN", { n: fmtInt(now) }) : "", fmt(sum(due))].filter(Boolean).join(" · ") })),
+      h("button", { type: "button", class: "btn primary", onclick: () => goToPlannedFor(due) }, t("review")));
+  } else box.replaceChildren();
+  // On the Planned tab: late ones from months before the one on screen, which its list can't show
+  const { start } = currentRange(), earlier = due.filter(p => p.date < start);
+  const eb = $("dueEarlier");
+  eb.hidden = !earlier.length;
+  if (earlier.length) {
+    const months = new Set(earlier.map(p => periodOf(p.date, startDay)));
+    eb.replaceChildren(
+      h("span", { class: "rec-icon" }, svg("bell", 18)),
+      h("div", { class: "rec-text" },
+        h("div", { class: "rec-title", text: months.size === 1 ? t("earlierOne", { n: fmtInt(earlier.length), month: periodShort([...months][0]) }) : t("earlierN", { n: fmtInt(earlier.length) }) }),
+        h("div", { class: "rec-sub", text: fmt(sum(earlier)) })),
+      h("button", { type: "button", class: "btn secondary", onclick: () => goToPlannedFor(earlier) }, t("show")));
+  } else eb.replaceChildren();
 }
 
 // Listens to expenses, income and planned items for the selected period only
@@ -1341,6 +1398,7 @@ function renderAll() {
   renderSide();
   renderChart();
   renderBadges();
+  renderDue();
   renderAccount();
   animateBars(animate);
   pulseNewlyOver(animate);
@@ -1588,6 +1646,10 @@ function renderBadges() {
   count("badge-expenses", expenses.length);
   count("badge-income", income.length);
   count("badge-planned", planned.length);
+  const due = dueNow().length;
+  $("badge-planned-due").textContent = due ? fmtInt(due) : "";
+  if (due) $("navPlanned").setAttribute("aria-label", t("plannedDueAria", { n: fmtInt(due) }));
+  else $("navPlanned").removeAttribute("aria-label");
   const lt = loanState().totals;
   count("badge-loans", lt.toYouN + lt.youOweN);
   const byCat = spentByCategory();
@@ -1640,7 +1702,9 @@ function renderFlat(boxId, items, rowFn, emptyMsg) {
 function entryRow({ key, icon, title, sub, subClass = "", amount, amountClass = "", menu, extra, onOpen }) {
   return h("div", { class: onOpen ? "row tappable" : "row", "data-key": key, onclick: onOpen ? e => { if (!e.target.closest("button")) onOpen(); } : null },
     icon,
-    h("div", { class: "row-info" }, h("div", { class: "row-title", text: title }), sub ? h("div", { class: `row-sub ${subClass}`.trim(), text: sub }) : null),
+    h("div", { class: "row-info" }, h("div", { class: "row-title", text: title }),
+      Array.isArray(sub) ? (sub.length ? h("div", { class: "row-sub" }, sub) : null)
+        : sub ? h("div", { class: `row-sub ${subClass}`.trim(), text: sub }) : null),
     h("span", { class: `row-amt num ${amountClass}`, text: amount }),
     extra || null,
     menu ? h("button", { type: "button", class: "icon-btn row-menu", "aria-haspopup": "menu", "aria-expanded": "false",
@@ -1670,7 +1734,7 @@ const plannedRow = p => entryRow({
   key: "planned:" + p.id,
   icon: catIcon(p.category),
   title: p.note || catLabel(p.category),
-  sub: p.note ? catLabel(p.category) : "",
+  sub: [dueLabel(p), p.note ? h("span", { class: "sub-text", text: catLabel(p.category) }) : null].filter(Boolean),
   amount: fmt(p.amount),
   extra: h("button", { type: "button", class: "mark-btn", "aria-label": `${t("markSpent")}: ${p.note || catLabel(p.category)}`,
     onclick: guard(() => markSpent(p)) }, svg("check", 18), h("span", { class: "mark-label", text: t("markSpent") })),
@@ -2006,7 +2070,7 @@ function renderSide() {
   $("plannedPreviewCard").hidden = !next.length;
   $("plannedPreview").replaceChildren(...next.map(p => h("div", { class: "mini-row" },
     h("div", { class: "row-info" }, h("div", { class: "row-title", text: p.note || catLabel(p.category) }),
-      h("div", { class: "row-sub", text: `${fmtDate(p.date)} · ${fmt(p.amount)}` })),
+      h("div", { class: "row-sub" }, dueLabel(p), h("span", { class: "sub-text", text: `${fmtDate(p.date)} · ${fmt(p.amount)}` }))),
     h("button", { type: "button", class: "btn secondary small", onclick: guard(() => markSpent(p)) }, t("markSpent")))));
 }
 
